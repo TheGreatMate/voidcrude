@@ -196,8 +196,8 @@ const HELP = [
   '1. BUY A PLOT - CLICK A "BUY" SIGN ON THE SURFACE.',
   '2. SCAN [4] - REVEALS CRUDE, ROCK AND GAS BELOW THE SCANNER.',
   '3. BUILD A RIG [1] ON YOUR PLOT.',
-  '4. CLICK THE RIG, THEN CLICK UNDERGROUND TO DRILL A PIPE.',
-  '   DRAG FROM ANY PIPE TO BRANCH IT. PIPE COSTS CREDITS PER METER.',
+  '4. CLICK THE RIG, THEN CLICK UNDERGROUND - EACH CLICK ADDS A JOINT.',
+  '   DRAG FROM ANY JOINT TO BRANCH. RIGHT-CLICK ENDS. PIPE COSTS $/METER.',
   '5. HIT A PURPLE POCKET AND THE RIG PUMPS IT INTO ITS TANK.',
   '6. BUY HAULERS [3]. ASSIGN THEM WITH < > ON EACH REFINERY PANEL.',
   '   THEY FETCH AND SELL CRUDE BY THEMSELVES. LOANS: BLACK MARKET/SHOP.',
@@ -1251,6 +1251,28 @@ function nearestPoint(r, px, py) {
   }
   return best;
 }
+function jointsOf(r) {
+  const out = [{ x: r.x, y: SURF + 1, seg: -1, t: 0 }];
+  for (const id of r.segs) {
+    const s = S.segs[id];
+    if (s.status === 'gone') continue;
+    const L = (s.status === 'queued' || s.status === 'drill') ? s.len : s.prog;
+    out.push({ x: s.x1 + s.ux * L, y: s.y1 + s.uy * L, seg: id, t: L, planned: s.status === 'queued' || s.status === 'drill' });
+  }
+  return out;
+}
+function nearestJoint(r, px, py) {
+  let best = null, bd = Infinity;
+  for (const j of jointsOf(r)) { const d = Math.hypot(px - j.x, py - j.y); if (d < bd) { bd = d; best = j; } }
+  best.d = bd;
+  return best;
+}
+// lay a pipe run; returns the new joint at its far end so the next click can chain from it
+function layPipe(r, start, tx, ty) {
+  if (!orderDrill(r, start, tx, ty)) return null;
+  const s = S.segs[S.segs.length - 1];
+  return { x: s.x1 + s.ux * s.len, y: s.y1 + s.uy * s.len, seg: s.id, t: s.len };
+}
 function orderDrill(r, start, tx, ty) {
   tx = clamp(tx, 1, W - 2); ty = clamp(ty, UG_TOP + 2, UG_BOT - 2);
   const len = Math.hypot(tx - start.x, ty - start.y);
@@ -2078,6 +2100,13 @@ function drawPlotFlags() {
 }
 function segPt(s, t) { return [Math.round(s.x1 + s.ux * t), Math.round(s.y1 + s.uy * t)]; }
 // finished pipe is cached on its own layer and only the newly drilled part is painted each frame
+function paintJoint(g, X, Y) {
+  g.fillStyle = '#05060c'; g.fillRect(X - 4, Y - 3, 9, 7); g.fillRect(X - 3, Y - 4, 7, 9);
+  g.fillStyle = '#c8962e'; g.fillRect(X - 3, Y - 2, 7, 5); g.fillRect(X - 2, Y - 3, 5, 7);
+  g.fillStyle = '#ffe08a'; g.fillRect(X - 2, Y - 2, 3, 1); g.fillRect(X - 2, Y - 2, 1, 2);
+  g.fillStyle = '#7a5418'; g.fillRect(X + 1, Y + 2, 2, 1); g.fillRect(X + 3, Y, 1, 2);
+  g.fillStyle = '#3a2808'; g.fillRect(X, Y, 1, 1);
+}
 function paintPipe(s, t0, t1) {
   const g = S.pipeX, mine = s.owner === 'you';
   const base = mine ? '#8b9bc0' : rcol(s.owner), hi = mine ? '#e0e8f6' : shade(base, 0.4), lo = mine ? '#3a4560' : shade(base, -0.45);
@@ -2095,15 +2124,19 @@ function paintPipe(s, t0, t1) {
     g.fillStyle = hi; g.fillRect(X - 1, Y - 1, 1, 1);
     g.fillStyle = lo; g.fillRect(X + 1, Y + 1, 1, 1);
   }
-  if (t0 === 0) { const [X, Y] = pt(0); g.fillStyle = '#05060c'; g.fillRect(X - 3, Y - 3, 7, 7); g.fillStyle = '#c7d2e2'; g.fillRect(X - 2, Y - 2, 5, 5); g.fillStyle = '#566c86'; g.fillRect(X - 1, Y - 1, 3, 3); }
+  if (t0 === 0) paintJoint(g, ...pt(0));
 }
 function drawPipes() {
-  if (S.pipeReset) { S.pipeX.clearRect(0, 0, S.pipeC.width, S.pipeC.height); for (const s of S.segs) s.drawn = 0; S.pipeReset = false; }
+  if (S.pipeReset) { S.pipeX.clearRect(0, 0, S.pipeC.width, S.pipeC.height); for (const s of S.segs) { s.drawn = 0; s.capped = false; } S.pipeReset = false; }
   // rival pipes first so yours always sit on top
   for (const pass of [false, true]) for (const s of S.segs) {
     if ((s.owner === 'you') !== pass || s.status === 'gone' || s.status === 'queued') continue;
     const d = s.drawn || 0;
     if (s.prog > d + 0.01) { paintPipe(s, d, s.prog); s.drawn = s.prog; }
+    if (pass && !s.capped && (s.status === 'done' || s.status === 'stop') && s.prog > 0) {
+      s.capped = true;
+      paintJoint(S.pipeX, Math.round((s.x1 + s.ux * s.prog) * R), Math.round((s.y1 + s.uy * s.prog - SURF) * R));
+    }
   }
   ctx.drawImage(S.pipeC, 0, SURF, W, UG_BOT - SURF);
   for (const j of S.joints) {
@@ -2124,6 +2157,10 @@ function drawPipes() {
   // queued plans + drill heads
   for (const s of S.segs) {
     if (s.owner !== 'you') continue;
+    if (s.status === 'queued' || s.status === 'drill') {
+      const X = Math.round((s.x1 + s.ux * s.len) * R), Y = Math.round((s.y1 + s.uy * s.len) * R);
+      q(X - 3, Y - 3, 7, 7, '#c8962e'); q(X - 2, Y - 2, 5, 5, '#05060c');
+    }
     if (s.status === 'queued') {
       for (let t = 0; t <= s.len; t += 4) { const [x, y] = segPt(s, t); q(x * R, y * R, 2, 2, P.gray); }
     } else if (s.status === 'drill') {
@@ -2178,10 +2215,16 @@ function previewInfo() {
   if (S.tool || S.paused || S.help) return null;
   if (S.drag && S.drag.kind === 'pipe' && mouse.moved) return { r: S.drag.rig, start: S.drag.start };
   if (!S.drag && S.sel && S.sel.kind === 'rig' && mouse.y > UG_TOP && mouse.y < UG_BOT && !overUI())
-    return { r: S.sel.ref, start: nearestPoint(S.sel.ref, mouse.x, mouse.y) };
+    return { r: S.sel.ref, start: S.pen && S.pen.rig === S.sel.ref ? S.pen.start : nearestJoint(S.sel.ref, mouse.x, mouse.y) };
   return null;
 }
+function drawPen() {
+  if (!S.pen || !S.sel || S.sel.ref !== S.pen.rig) return;
+  const j = S.pen.start;
+  glow(j.x, j.y, 6, '#ffe08a', 0.4 + 0.3 * Math.sin(GT * 6));
+}
 function drawPreview() {
+  drawPen();
   const pv = previewInfo();
   if (!pv) return;
   const { start } = pv;
@@ -2309,7 +2352,7 @@ function tutorialHint() {
   if (!S.plots.some(p => p.owner === 'you')) return 'BUY A PLOT OF LAND - CLICK A "BUY" SIGN';
   if (!S.scans.length && !S.segs.some(s => s.owner === 'you')) return 'SCAN FOR VOIDCRUDE [4], THEN CLICK ON YOUR PLOT';
   if (!mine.length) return 'BUILD A RIG [1] ON YOUR PLOT ABOVE THE CRUDE';
-  if (!S.segs.some(s => s.owner === 'you')) return 'CLICK YOUR RIG, THEN CLICK UNDERGROUND TO DRILL';
+  if (!S.segs.some(s => s.owner === 'you')) return 'CLICK YOUR RIG, THEN CLICK UNDERGROUND - EACH CLICK ADDS A PIPE JOINT';
   if (!mine.some(r => r.pockets.size)) return 'STEER YOUR PIPE INTO A PURPLE CRUDE POCKET';
   if (!S.haulers.length) return 'BUY A HAULER [3] - IT HAULS AND SELLS BY ITSELF';
   if (S.stats.sold === 0) return 'USE < > ON THE PRICE PANELS UP TOP TO SPLIT HAULERS BETWEEN SIDES';
@@ -2384,7 +2427,7 @@ function drawSelPanel() {
       let live = 0; for (const id of netPockets(o)) live += S.pockets[id].amt;
       const nl = netOf(o).size - 1;
       const state = o.offline > 0 ? 'OFFLINE ' + o.offline + ' DAYS' : o.drilling ? 'DRILLING' : o.pumping ? 'PUMPING' : o.tank >= st.rigCap() - 0.01 ? 'TANK FULL' : 'IDLE';
-      lines = ['RIG #' + o.id + ' - ' + state + (nl ? '   COUPLED TO ' + nl + ' RIG' + (nl > 1 ? 'S' : '') : ''), 'TANK ' + fmt(o.tank) + '/' + st.rigCap() + '   CRUDE LEFT IN POCKETS ' + fmt(live) + 'U', G.couplers ? 'DRILL INTO ANOTHER RIG\'S PIPE TO COUPLE THEM' : 'CLICK UNDERGROUND TO DRILL. DRAG FROM A PIPE TO BRANCH'];
+      lines = ['RIG #' + o.id + ' - ' + state + (nl ? '   COUPLED TO ' + nl + ' RIG' + (nl > 1 ? 'S' : '') : ''), 'TANK ' + fmt(o.tank) + '/' + st.rigCap() + '   CRUDE LEFT IN POCKETS ' + fmt(live) + 'U', G.couplers ? 'DRILL INTO ANOTHER RIG\'S PIPE TO COUPLE THEM' : 'CLICK TO ADD PIPE JOINTS. DRAG FROM A JOINT TO BRANCH. RIGHT-CLICK ENDS'];
       btns = [['STOP DRILL', () => stopDrill(o), { disabled: !activeSeg(o) }], ['SCRAP +$' + Math.round(COST.rig * 0.4), () => scrapRig(o), { color: P.red }]];
     } else if (S.sel.kind === 'hauler') {
       lines = ['HAULER - ' + haulerLabel(o), 'CARGO ' + fmt(o.cargo) + '/' + st.hCap() + '   SELLS AT ' + S.stations[o.side].name + (has('auto') ? ' (SMART)' : ''), 'FULLY AUTOMATIC. PICK ITS SIDE ON THE RIGHT'];
@@ -2992,10 +3035,10 @@ function stationAt(x, y) {
   return null;
 }
 function pipeGrab(x, y) {
-  let best = null, bd = 5;
+  let best = null, bd = 6;
   for (const r of myRigs()) {
-    const n = nearestPoint(r, x, y);
-    if (n.seg >= 0 && n.d < bd) { bd = n.d; best = { rig: r, start: n }; }
+    const j = nearestJoint(r, x, y);
+    if (j.seg >= 0 && j.d < bd) { bd = j.d; best = { rig: r, start: j }; }
   }
   return best;
 }
@@ -3003,7 +3046,7 @@ function playDown(p) {
   if (S.paused || S.help || S.choice || S.bm || S.tool) return;
   S.drag = null;
   const r = rigAt(p.x, p.y);
-  if (r && r.owner === 'you') { S.drag = { kind: 'pipe', rig: r, start: nearestPoint(r, r.x, SURF + 1) }; return; }
+  if (r && r.owner === 'you') { S.drag = { kind: 'pipe', rig: r, start: jointsOf(r)[0] }; return; }
   if (p.y > UG_TOP) { const g = pipeGrab(p.x, p.y); if (g) S.drag = { kind: 'pipe', rig: g.rig, start: g.start }; }
 }
 function playUp(p) {
@@ -3012,7 +3055,7 @@ function playUp(p) {
   if (S.tool) { if (p.y > 13 && p.y < 341) placeAt(S.tool, Math.round(p.x / 4) * 4); return; }
   const d = S.drag; S.drag = null;
   if (d && mouse.moved) {
-    if (d.kind === 'pipe' && p.y > UG_TOP) { orderDrill(d.rig, d.start, p.x, p.y); S.sel = { kind: 'rig', ref: d.rig }; return; }
+    if (d.kind === 'pipe' && p.y > UG_TOP) { const end = layPipe(d.rig, d.start, p.x, p.y); S.sel = { kind: 'rig', ref: d.rig }; S.pen = end ? { rig: d.rig, start: end } : null; return; }
   }
   clickWorld(p);
 }
@@ -3026,12 +3069,14 @@ function clickWorld(p) {
   const h = haulerAt(p.x, p.y);
   if (h) { S.sel = { kind: 'hauler', ref: h }; sfx('click'); return; }
   const r = rigAt(p.x, p.y);
-  if (r) { if (r.owner === 'you') { S.sel = { kind: 'rig', ref: r }; sfx('click'); } return; }
+  if (r) { if (r.owner === 'you') { S.sel = { kind: 'rig', ref: r }; S.pen = null; sfx('click'); } return; }
   const si = siloAt(p.x, p.y);
   if (si) { S.sel = { kind: 'silo', ref: si }; sfx('click'); return; }
   if (S.sel && S.sel.kind === 'rig' && p.y > UG_TOP) {
     const rr = S.sel.ref;
-    orderDrill(rr, nearestPoint(rr, p.x, p.y), p.x, p.y);
+    const start = S.pen && S.pen.rig === rr ? S.pen.start : nearestJoint(rr, p.x, p.y);
+    const end = layPipe(rr, start, p.x, p.y);
+    if (end) S.pen = { rig: rr, start: end };
     return;
   }
   if (p.y > UG_TOP && myRigs().length && !S.sel) msg('SELECT A RIG FIRST, THEN CLICK WHERE TO DRILL', P.lgray);
@@ -3046,7 +3091,7 @@ cv.addEventListener('pointerleave', () => { mouse.x = -99; mouse.y = -99; });
 cv.addEventListener('pointerdown', e => {
   Sound.init();
   const p = toLogical(e); mouse.x = p.x; mouse.y = p.y;
-  if (e.button === 2) { if (screen === 'play' && S) { S.tool = null; S.sel = null; S.drag = null; } return; }
+  if (e.button === 2) { if (screen === 'play' && S) { if (S.pen) S.pen = null; else { S.tool = null; S.sel = null; } S.drag = null; } return; }
   try { cv.setPointerCapture(e.pointerId); } catch (_) { }
   mouse.down = true; mouse.sx = p.x; mouse.sy = p.y; mouse.moved = false; mouse.consumed = false;
   for (let i = BTN.length - 1; i >= 0; i--) {
@@ -3068,7 +3113,7 @@ addEventListener('keydown', e => {
   if (S.choice) { const i = '123'.indexOf(k); if (i >= 0 && S.choice[i]) pickPerk(i); return; }
   if (S.bm && k !== 'escape' && k !== '6') return;
   if (k === ' ' || k === 'p') { togglePause(); e.preventDefault(); return; }
-  if (k === 'escape') { if (S.bm) S.bm = false; else if (S.help) S.help = false; else if (S.tool || S.sel) { S.tool = null; S.sel = null; } else togglePause(); return; }
+  if (k === 'escape') { if (S.bm) S.bm = false; else if (S.help) S.help = false; else if (S.pen) S.pen = null; else if (S.tool || S.sel) { S.tool = null; S.sel = null; } else togglePause(); return; }
   if (S.paused) return;
   if (k === '1') setTool('rig');
   else if (k === '2') setTool('silo');

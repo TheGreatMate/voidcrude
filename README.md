@@ -83,7 +83,9 @@ docker run -d --name voidcrude -p 8088:80 voidcrude:latest
 | `6` | Black market |
 | `Q` | Your tycoon's ability |
 | `1`-`3` on a rank-up | Pick a perk card |
-| Click rig, then underground | Drill a pipe (drag from any pipe to branch) |
+| Click rig, then click underground | Lay a pipe; each click adds a joint and the next run continues from it |
+| Drag from a joint (or the rig) | Branch a new pipe from that joint |
+| Right-click / `Esc` | Finish the pipe you are laying |
 | Click a refinery, or ► on its price panel | Move one of your haulers to that side |
 | ◄ on a refinery's price panel | Move one of its haulers to the other side |
 | Click a hauler, then a refinery | Switch that hauler's side |
