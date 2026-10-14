@@ -18,7 +18,7 @@ const PREF_KEY = 'voidcrude_prefs_v1';
 const META_KEY = 'voidcrude_legacy_v1';
 
 const P = {
-  black: '#0b0b14', navy: '#1a1c2c', plum: '#5d275d', red: '#b13e53', orange: '#ef7d57',
+  black: '#0b0b14', navy: '#1b2350', plum: '#5d275d', red: '#b13e53', orange: '#ef7d57',
   yellow: '#ffcd75', lime: '#a7f070', green: '#38b764', teal: '#257179', dblue: '#29366f',
   blue: '#3b5dc9', sky: '#41a6f6', cyan: '#73eff7', white: '#f4f4f4', lgray: '#94b0c2',
   gray: '#566c86', dgray: '#333c57',
@@ -55,7 +55,7 @@ const TECH = [
   { id: 'ion1', b: 2, row: 0, name: 'ION ENGINES', cost: 10, req: [], desc: '+20% HAULER SPEED' },
   { id: 'cargo1', b: 2, row: 1, name: 'CARGO PODS', cost: 20, req: ['ion1'], desc: '+10 HAULER CAPACITY' },
   { id: 'ion2', b: 2, row: 2, name: 'ION ENGINES II', cost: 25, req: ['ion1'], desc: 'ANOTHER +20% HAULER SPEED' },
-  { id: 'auto', b: 2, row: 3, name: 'AUTOPILOT', cost: 45, req: ['cargo1'], desc: 'HAULERS LOOP: THEIR RIG -> BEST PRICED STATION -> BACK' },
+  { id: 'auto', b: 2, row: 3, name: 'SMART ROUTING', cost: 45, req: ['cargo1'], desc: 'HAULERS DIVERT TO THE OTHER STATION WHEN IT PAYS 10%+ MORE' },
   { id: 'cargo2', b: 2, row: 4, name: 'CARGO PODS II', cost: 40, req: ['cargo1'], desc: 'ANOTHER +10 HAULER CAPACITY' },
   { id: 'fleet', b: 2, row: 5, name: 'FLEET CHARTER', cost: 70, req: ['auto'], desc: 'START EVERY SECTOR WITH 2 FREE HAULERS' },
   { id: 'warp', b: 2, row: 6, name: 'WARP HAULERS', cost: 120, req: ['fleet', 'ion2'], cap: true, desc: 'HAULERS FLY, LOAD AND UNLOAD TWICE AS FAST' },
@@ -197,8 +197,8 @@ const HELP = [
   '4. CLICK THE RIG, THEN CLICK UNDERGROUND TO DRILL A PIPE.',
   '   DRAG FROM ANY PIPE TO BRANCH IT. PIPE COSTS CREDITS PER METER.',
   '5. HIT A PURPLE POCKET AND THE RIG PUMPS IT INTO ITS TANK.',
-  '6. BUY HAULERS [3]. CLICK A HAULER, THEN A RIG TO LOAD,',
-  '   THEN A STATION (HELIX OR NOVA) TO SELL. YOU CAN ALSO DRAG.',
+  '6. BUY HAULERS [3] AND PICK A SIDE: HELIX (LEFT) OR NOVA (RIGHT).',
+  '   THEY FETCH CRUDE AND SELL IT BY THEMSELVES. CLICK ONE TO SWITCH.',
   '7. SILOS [2] NEXT TO RIGS STORE THE OVERFLOW.',
   '8. ROCK IN THE WAY? ROCK BLASTER [5] CLEARS IT. LIMITED CHARGES.',
   '',
@@ -214,7 +214,10 @@ const HELP = [
 // ---------------------------------------------------------------- canvas
 const cv = document.getElementById('game');
 const crt = document.getElementById('crt');
-cv.width = W; cv.height = H;
+// The game is laid out on a 640x360 grid but rendered at 2x (1280x720) so sprites,
+// terrain and text get 16/32-bit era detail. q() draws in those physical pixels.
+const R = 2;
+cv.width = W * R; cv.height = H * R;
 const ctx = cv.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
@@ -225,11 +228,62 @@ function resize() {
   cv.style.height = Math.floor(H * use) + 'px';
   crt.style.width = cv.style.width; crt.style.height = cv.style.height;
   crt.style.backgroundSize = `100% ${Math.max(2, use)}px`;
+  // when the window is too small to show every 2x pixel, scale smoothly so text stays readable
+  cv.style.imageRendering = W * use * (window.devicePixelRatio || 1) < W * R - 1 ? 'auto' : 'pixelated';
 }
 addEventListener('resize', resize);
 
 function mk(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 function rect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
+function q(X, Y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(X / R, Y / R, w / R, h / R); }
+
+// colour helpers: shade('#hex', +0.3) lightens, shade('#hex', -0.3) darkens
+const shadeCache = new Map();
+function shade(hex, amt) {
+  const key = hex + amt;
+  let v = shadeCache.get(key);
+  if (v) return v;
+  const c = rgb(hex).map(x => Math.round(clamp(amt >= 0 ? x + (255 - x) * amt : x * (1 + amt), 0, 255)));
+  v = '#' + c.map(x => x.toString(16).padStart(2, '0')).join('');
+  shadeCache.set(key, v);
+  return v;
+}
+function mixRGB(a, b, t) { return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')'; }
+
+// soft additive light, used for beacons, engines, crude, sparks and explosions
+const glowCache = {};
+function glowSprite(col) {
+  let g = glowCache[col];
+  if (g) return g;
+  g = mk(64, 64);
+  const x = g.getContext('2d'), [r, gg, b] = rgb(col);
+  const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, `rgba(${r},${gg},${b},0.9)`);
+  gr.addColorStop(0.3, `rgba(${r},${gg},${b},0.35)`);
+  gr.addColorStop(1, `rgba(${r},${gg},${b},0)`);
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  return (glowCache[col] = g);
+}
+function glow(x, y, r, col, a = 1) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = clamp(a, 0, 1);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(glowSprite(col), x - r, y - r, r * 2, r * 2);
+  ctx.restore();
+}
+// smooth value noise for terrain and planet textures
+function hash2(x, y, s) {
+  let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 982451653)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function vnoise(x, y, s) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s), c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 function fmt(n) { return Math.floor(n).toLocaleString('en-US'); }
 function inRect(p, x, y, w, h) { return p.x >= x && p.x < x + w && p.y >= y && p.y < y + h; }
@@ -245,53 +299,61 @@ function mulberry32(a) {
 }
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
-// ---------------------------------------------------------------- bitmap font (3x5)
+// ---------------------------------------------------------------- bitmap font (5x7, stretched to 5x9 at 2x detail)
 const GLYPHS = {
-  A: [2, 5, 7, 5, 5], B: [6, 5, 6, 5, 6], C: [3, 4, 4, 4, 3], D: [6, 5, 5, 5, 6], E: [7, 4, 6, 4, 7],
-  F: [7, 4, 6, 4, 4], G: [3, 4, 5, 5, 3], H: [5, 5, 7, 5, 5], I: [7, 2, 2, 2, 7], J: [1, 1, 1, 5, 2],
-  K: [5, 5, 6, 5, 5], L: [4, 4, 4, 4, 7], M: [5, 7, 7, 5, 5], N: [6, 5, 5, 5, 5], O: [2, 5, 5, 5, 2],
-  P: [6, 5, 6, 4, 4], Q: [2, 5, 5, 6, 3], R: [6, 5, 6, 5, 5], S: [3, 4, 2, 1, 6], T: [7, 2, 2, 2, 2],
-  U: [5, 5, 5, 5, 7], V: [5, 5, 5, 2, 2], W: [5, 5, 7, 7, 5], X: [5, 5, 2, 5, 5], Y: [5, 5, 2, 2, 2],
-  Z: [7, 1, 2, 4, 7],
-  '0': [7, 5, 5, 5, 7], '1': [2, 6, 2, 2, 7], '2': [6, 1, 2, 4, 7], '3': [6, 1, 2, 1, 6], '4': [5, 5, 7, 1, 1],
-  '5': [7, 4, 6, 1, 6], '6': [3, 4, 7, 5, 7], '7': [7, 1, 2, 2, 2], '8': [7, 5, 7, 5, 7], '9': [7, 5, 7, 1, 6],
-  '.': [0, 0, 0, 0, 2], ',': [0, 0, 0, 2, 4], ':': [0, 2, 0, 2, 0], '!': [2, 2, 2, 0, 2], '?': [6, 1, 2, 0, 2],
-  '-': [0, 0, 7, 0, 0], '+': [0, 2, 7, 2, 0], '/': [1, 1, 2, 4, 4], '$': [3, 6, 2, 3, 6], '%': [5, 1, 2, 4, 5],
-  '(': [1, 2, 2, 2, 1], ')': [4, 2, 2, 2, 4], '<': [1, 2, 4, 2, 1], '>': [4, 2, 1, 2, 4], '=': [0, 7, 0, 7, 0],
-  "'": [2, 2, 0, 0, 0], '"': [5, 5, 0, 0, 0], '#': [5, 7, 5, 7, 5], '*': [5, 2, 7, 2, 5], '[': [3, 2, 2, 2, 3],
-  ']': [6, 2, 2, 2, 6], '&': [2, 5, 2, 5, 3], '^': [2, 5, 0, 0, 0], '_': [0, 0, 0, 0, 7], '|': [2, 2, 2, 2, 2], ';': [0, 2, 0, 2, 4],
+  A: [14, 17, 17, 31, 17, 17, 17], B: [30, 17, 17, 30, 17, 17, 30], C: [14, 17, 16, 16, 16, 17, 14], D: [28, 18, 17, 17, 17, 18, 28],
+  E: [31, 16, 16, 30, 16, 16, 31], F: [31, 16, 16, 30, 16, 16, 16], G: [14, 17, 16, 23, 17, 17, 15], H: [17, 17, 17, 31, 17, 17, 17],
+  I: [14, 4, 4, 4, 4, 4, 14], J: [7, 2, 2, 2, 2, 18, 12], K: [17, 18, 20, 24, 20, 18, 17], L: [16, 16, 16, 16, 16, 16, 31],
+  M: [17, 27, 21, 21, 17, 17, 17], N: [17, 17, 25, 21, 19, 17, 17], O: [14, 17, 17, 17, 17, 17, 14], P: [30, 17, 17, 30, 16, 16, 16],
+  Q: [14, 17, 17, 17, 21, 18, 13], R: [30, 17, 17, 30, 20, 18, 17], S: [15, 16, 16, 14, 1, 1, 30], T: [31, 4, 4, 4, 4, 4, 4],
+  U: [17, 17, 17, 17, 17, 17, 14], V: [17, 17, 17, 17, 17, 10, 4], W: [17, 17, 17, 21, 21, 21, 10], X: [17, 17, 10, 4, 10, 17, 17],
+  Y: [17, 17, 17, 10, 4, 4, 4], Z: [31, 1, 2, 4, 8, 16, 31],
+  '0': [14, 17, 19, 21, 25, 17, 14], '1': [4, 12, 4, 4, 4, 4, 14], '2': [14, 17, 1, 2, 4, 8, 31], '3': [31, 2, 4, 2, 1, 17, 14],
+  '4': [2, 6, 10, 18, 31, 2, 2], '5': [31, 16, 30, 1, 1, 17, 14], '6': [6, 8, 16, 30, 17, 17, 14], '7': [31, 1, 2, 4, 8, 8, 8],
+  '8': [14, 17, 17, 14, 17, 17, 14], '9': [14, 17, 17, 15, 1, 2, 12],
+  '.': [0, 0, 0, 0, 0, 12, 12], ',': [0, 0, 0, 0, 12, 4, 8], ':': [0, 12, 12, 0, 12, 12, 0], ';': [0, 12, 12, 0, 12, 4, 8],
+  '!': [4, 4, 4, 4, 4, 0, 4], '?': [14, 17, 1, 2, 4, 0, 4], '-': [0, 0, 0, 31, 0, 0, 0], '+': [0, 4, 4, 31, 4, 4, 0],
+  '/': [1, 1, 2, 4, 8, 16, 16], '$': [4, 15, 20, 14, 5, 30, 4], '%': [24, 25, 2, 4, 8, 19, 3], '(': [2, 4, 8, 8, 8, 4, 2],
+  ')': [8, 4, 2, 2, 2, 4, 8], '<': [2, 4, 8, 16, 8, 4, 2], '>': [8, 4, 2, 1, 2, 4, 8], '=': [0, 0, 31, 0, 31, 0, 0],
+  "'": [4, 4, 8, 0, 0, 0, 0], '"': [10, 10, 0, 0, 0, 0, 0], '#': [10, 10, 31, 10, 31, 10, 10], '*': [0, 4, 21, 14, 21, 4, 0],
+  '[': [14, 8, 8, 8, 8, 8, 14], ']': [14, 2, 2, 2, 2, 2, 14], '^': [4, 10, 17, 0, 0, 0, 0], '_': [0, 0, 0, 0, 0, 0, 31],
+  '|': [4, 4, 4, 4, 4, 4, 4], '&': [12, 18, 20, 8, 21, 18, 13], '@': [14, 17, 23, 21, 23, 16, 15],
 };
+const ROWMAP = [0, 1, 1, 2, 3, 4, 5, 5, 6]; // 7 source rows -> 9 drawn rows
 const atlasCache = {};
 function atlas(color) {
   let a = atlasCache[color];
   if (a) return a;
-  a = mk(64 * 4, 5);
+  a = mk(64 * 8, 10);
   const g = a.getContext('2d');
   g.fillStyle = color;
   for (let i = 0; i < 64; i++) {
     const gl = GLYPHS[String.fromCharCode(32 + i)];
     if (!gl) continue;
-    for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (gl[r] & (4 >> c)) g.fillRect(i * 4 + c, r, 1, 1);
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 5; c++) if (gl[ROWMAP[r]] & (16 >> c)) g.fillRect(i * 8 + c, r, 1, 1);
   }
   return (atlasCache[color] = a);
 }
 function tw(s, scale = 1) { return Math.max(0, String(s).length * 4 * scale - scale); }
-function txt(s, x, y, color = P.white, scale = 1, align = 'l') {
-  s = String(s).toUpperCase();
-  const w = tw(s, scale);
-  if (align === 'c') x -= (w / 2) | 0; else if (align === 'r') x -= w;
-  x |= 0; y |= 0;
+function drawText(g, s, x, y, color, scale) {
   const a = atlas(color);
   for (let i = 0; i < s.length; i++) {
     let code = s.charCodeAt(i) - 32;
     if (code === 0) continue;
     if (code < 0 || code > 63) code = 31;
-    ctx.drawImage(a, code * 4, 0, 3, 5, x + i * 4 * scale, y, 3 * scale, 5 * scale);
+    g.drawImage(a, code * 8, 0, 6, 10, x + i * 4 * scale, y, 3 * scale, 5 * scale);
   }
+}
+function txt(s, x, y, color = P.white, scale = 1, align = 'l') {
+  s = String(s).toUpperCase();
+  const w = tw(s, scale);
+  if (align === 'c') x -= w / 2; else if (align === 'r') x -= w;
+  x = Math.round(x * R) / R; y = Math.round(y * R) / R;
+  drawText(ctx, s, x, y, color, scale);
   return w;
 }
 function txtS(s, x, y, color, scale = 1, align = 'l') {
-  txt(s, x + scale, y + scale, P.black, scale, align);
+  txt(s, x + scale * 0.5, y + scale * 0.5, P.black, scale, align);
   return txt(s, x, y, color, scale, align);
 }
 
@@ -393,7 +455,7 @@ const st = {
     * (isChar('rusty') ? 1.25 : 1) * (abilOn('iris') ? 5 : 1) * (1 + 0.06 * lv('crew')),
   rock: () => has('laser2') ? 0.75 : has('laser1') ? 0.3 : 0,
   pump: () => 3 * (1 + 0.3 * (has('pump1') + has('pump2'))) * (1 + 0.4 * pk('pump')) * (abilOn('rusty') ? 3 : 1) * (1 + 0.06 * lv('crew')),
-  rivalPump: () => (2.2 + 0.3 * S.d) * (isChar('grane') ? 0.85 : 1),
+  rivalPump: () => (2.8 + 0.3 * S.d) * (isChar('grane') ? 0.85 : 1),
   yield: () => 1 + 0.25 * (has('inject') + has('core')),
   rigCap: () => 40 + 25 * has('tank1'),
   siloCap: () => 150 + 100 * has('silo1'),
@@ -512,7 +574,7 @@ function sectorOptions() {
   const out = [];
   for (let k = 0; k < 3; k++) {
     const rng = mulberry32((G.seed * 7 + G.sector * 977 + k * 131) >>> 0);
-    const nRiv = G.sector >= 5 && rng() < 0.25 ? 3 : rng() < 0.45 + k * 0.1 ? 2 : 1;
+    const nRiv = G.sector >= 4 && rng() < 0.3 + k * 0.1 ? 2 : 1;
     const pool = [...RIVAL_IDS];
     const rivals = [];
     while (rivals.length < nRiv) rivals.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
@@ -640,7 +702,7 @@ function applyPerk(p) {
   switch (p.id) {
     case 'blast': S.blasts += 2; break;
     case 'cash': { const v = 800 + 300 * S.d; G.credits += v; msg('INVESTOR WIRED +$' + fmt(v), P.yellow); break; }
-    case 'hauler': spawnHauler(); break;
+    case 'hauler': spawnHauler(); msg('A FREE HAULER JOINS THE FLEET', P.lime); break;
     case 'rd': gainRD(12); break;
     case 'time': S.days += 10; msg('OVERTIME APPROVED: +10 DAYS', P.lime); break;
     case 'sabotage': for (const r of S.rigs) if (isRival(r.owner)) r.offline = Math.max(r.offline, 10); msg('ALL RIVAL RIGS SABOTAGED!', P.lime); break;
@@ -867,14 +929,14 @@ function genSector(opt) {
       const free = S.plots.filter(p => !p.owner);
       const p = free[Math.floor(rng() * free.length)];
       p.owner = id;
-      S.rv[id].queue.push({ day: 1, plot: p.i }, { day: 9, plot: p.i });
+      S.rv[id].queue.push({ day: 1, plot: p.i });
     }
   }
   const base = (11 + d * 0.9) * (mods.includes('boom') ? 1.25 : mods.includes('slump') ? 0.8 : 1);
   S.stations = [mkStation('HELIX', 28, base, rng), mkStation('NOVA', 612, base, rng)];
   if (mods.includes('boom')) for (const s of S.stations) s.amp = 1.6;
   S.blasts = st.blastMax();
-  buildDirt(); buildFog(); buildSky();
+  buildDirt(); buildFog(); buildSky(); buildPipeLayer();
   if (has('fleet')) { spawnHauler(); spawnHauler(); }
   if (isChar('bolt')) spawnHauler();
   S.sel = null;
@@ -883,107 +945,235 @@ function genSector(opt) {
   if (G.sector > 1 || opt.rivals.length) taunt(opt.rivals[0]);
 }
 
-// ---------------------------------------------------------------- textures
-const STRATA = [[86, 60, 52], [74, 53, 48], [64, 45, 44], [54, 38, 41], [44, 31, 37], [36, 26, 33]];
-function buildDirt() {
-  const w = COLS * CELL, h = ROWS * CELL;
-  S.dirtC = mk(w, h); S.dirtX = S.dirtC.getContext('2d');
-  S.dirtImg = S.dirtX.createImageData(w, h);
-  const rng = mulberry32(G.seed + G.sector * 17);
-  S.noise = new Float32Array(w * h);
-  for (let k = 0; k < w * h; k++) S.noise[k] = rng();
-  for (let i = 0; i < COLS * ROWS; i++) paintCell(i, false);
-  S.dirtX.putImageData(S.dirtImg, 0, 0);
+// ---------------------------------------------------------------- textures (built at 2x detail)
+const STRATA = [[132, 88, 66], [114, 76, 60], [98, 65, 56], [84, 56, 54], [70, 47, 52], [58, 40, 50], [47, 33, 46], [37, 27, 41]];
+const TEX_W = COLS * CELL * R, TEX_H = ROWS * CELL * R;
+function dirtRGB(X, Y) {
+  const warp = Math.sin(X * 0.02 + G.sector) * 12 + Math.sin(X * 0.0065) * 20 + (S.tex[Y * TEX_W + X] - 0.5) * 10;
+  const f = clamp((Y + warp) / TEX_H, 0, 0.999) * (STRATA.length - 1);
+  const b = Math.floor(f), fr = f - b;
+  const t = fr > 0.78 ? (fr - 0.78) / 0.22 : 0;
+  const a = STRATA[b], c = STRATA[Math.min(b + 1, STRATA.length - 1)];
+  const k = (0.78 + 0.44 * S.tex[Y * TEX_W + X]) * (1 - 0.18 * Y / TEX_H) * ((((Y + warp) | 0) % 29 === 0) ? 0.82 : 1);
+  return [(a[0] + (c[0] - a[0]) * t) * k, (a[1] + (c[1] - a[1]) * t) * k, (a[2] + (c[2] - a[2]) * t) * k];
 }
-function paintCell(i, flush = true) {
-  const c = i % COLS, r = (i / COLS) | 0, t = S.grid[i];
-  const img = S.dirtImg.data, w = COLS * CELL;
-  for (let py = 0; py < 4; py++) for (let px = 0; px < 4; px++) {
-    const X = c * 4 + px, Y = r * 4 + py, k = Y * w + X, n = S.noise[k];
+function buildDirt() {
+  S.dirtC = mk(TEX_W, TEX_H); S.dirtX = S.dirtC.getContext('2d');
+  S.dirtImg = S.dirtX.createImageData(TEX_W, TEX_H);
+  const rng = mulberry32(G.seed + G.sector * 17), seed = (G.seed + G.sector * 101) | 0;
+  S.noise = new Float32Array(TEX_W * TEX_H);
+  S.tex = new Float32Array(TEX_W * TEX_H);
+  for (let Y = 0; Y < TEX_H; Y++) for (let X = 0; X < TEX_W; X++) {
+    const k = Y * TEX_W + X;
+    S.noise[k] = rng();
+    S.tex[k] = 0.55 * vnoise(X / 14, Y / 9, seed) + 0.3 * vnoise(X / 5, Y / 4, seed + 1) + 0.15 * S.noise[k];
+  }
+  for (let i = 0; i < COLS * ROWS; i++) paintCellRaw(i);
+  S.dirtX.putImageData(S.dirtImg, 0, 0);
+  // hidden ground: the same strata, very dark and without any features, shown under the fog
+  S.darkC = mk(TEX_W, TEX_H);
+  const dx = S.darkC.getContext('2d'), dimg = dx.createImageData(TEX_W, TEX_H);
+  for (let Y = 0; Y < TEX_H; Y++) for (let X = 0; X < TEX_W; X++) {
+    const o = (Y * TEX_W + X) * 4, c = dirtRGB(X, Y), sp = S.noise[Y * TEX_W + X] > 0.997 ? 30 : 0;
+    dimg.data[o] = c[0] * 0.2 + 6 + sp; dimg.data[o + 1] = c[1] * 0.18 + 4 + sp; dimg.data[o + 2] = c[2] * 0.22 + 12 + sp; dimg.data[o + 3] = 255;
+  }
+  dx.putImageData(dimg, 0, 0);
+}
+function isT(c, r, t) { return c >= 0 && r >= 0 && c < COLS && r < ROWS && S.grid[r * COLS + c] === t; }
+function paintCellRaw(i) {
+  const c = i % COLS, r = (i / COLS) | 0, t = S.grid[i], img = S.dirtImg.data;
+  const S8 = CELL * R;
+  const up = isT(c, r - 1, t), dn = isT(c, r + 1, t), lf = isT(c - 1, r, t), rt = isT(c + 1, r, t);
+  for (let py = 0; py < S8; py++) for (let px = 0; px < S8; px++) {
+    const X = c * S8 + px, Y = r * S8 + py, k = Y * TEX_W + X, n = S.noise[k], tx = S.tex[k];
     let col;
     if (t === T_DIRT) {
-      const f = (Y + Math.sin(X * 0.04 + G.sector) * 6 + Math.sin(X * 0.013) * 10) / (ROWS * 4) * STRATA.length;
-      const band = clamp(Math.floor(f + (BAYER[(Y & 3) * 4 + (X & 3)] / 16 - 0.5) * 0.6), 0, STRATA.length - 1);
-      const b = STRATA[band], v = n < 0.07 ? -14 : n > 0.95 ? 16 : 0;
-      col = [b[0] + v, b[1] + v, b[2] + v];
+      col = dirtRGB(X, Y);
+      if (n > 0.993) col = col.map(v => v * 1.45 + 10); else if (n < 0.006) col = col.map(v => v * 0.55);
     } else if (t === T_ROCK) {
-      const above = r > 0 && S.grid[i - COLS] !== T_ROCK;
-      col = (above && py === 0) ? [150, 156, 172] : n < 0.15 ? [70, 72, 86] : n > 0.9 ? [128, 132, 148] : [98, 101, 118];
+      const corner = (!up && !lf && px + py < 3) || (!up && !rt && (S8 - 1 - px) + py < 3) || (!dn && !lf && px + (S8 - 1 - py) < 3) || (!dn && !rt && (S8 - 1 - px) + (S8 - 1 - py) < 3);
+      if (corner) col = dirtRGB(X, Y);
+      else {
+        const m = 0.78 + 0.45 * tx;
+        col = [92 * m, 97 * m, 120 * m];
+        if (!up && py === 0) col = [184, 190, 212];
+        else if (!up && py === 1) col = [146, 152, 176];
+        else if (!dn && py >= S8 - 2) col = [44, 46, 62];
+        else if (!lf && px === 0) col = [150, 156, 178];
+        else if (!rt && px === S8 - 1) col = [58, 60, 78];
+        else if (n > 0.975) col = [40, 42, 58];
+        else if (n < 0.02) col = [170, 176, 198];
+        col = col.map(v => v * (1 - 0.15 * Y / TEX_H));
+      }
     } else if (t === T_GAS) {
-      col = n > 0.88 ? [115, 239, 247] : n > 0.6 ? [60, 150, 165] : [37, 113, 121];
+      const m = 0.8 + 0.4 * tx;
+      col = [24 * m, 82 * m, 96 * m];
+      if ((!up && py < 2) || (!dn && py >= S8 - 2) || (!lf && px < 2) || (!rt && px >= S8 - 2)) col = [70, 178, 190];
+      if (n > 0.965) col = [168, 248, 255]; else if (n > 0.88) col = [80, 186, 200];
     } else {
-      col = n > 0.94 ? [42, 22, 56] : [18, 10, 24];
+      const m = 0.75 + 0.5 * tx;
+      col = [22 * m, 11 * m, 30 * m];
+      if ((!up && py < 1) || (!lf && px < 1) || (!rt && px >= S8 - 1) || (!dn && py >= S8 - 1)) col = [56, 32, 66];
     }
     const o = k * 4;
     img[o] = col[0]; img[o + 1] = col[1]; img[o + 2] = col[2]; img[o + 3] = 255;
   }
-  if (flush) S.dirtX.putImageData(S.dirtImg, 0, 0, c * 4, r * 4, 4, 4);
 }
-function buildFog() {
-  const w = COLS * CELL, h = ROWS * CELL;
-  S.fogC = mk(w, h); S.fogX = S.fogC.getContext('2d');
-  const img = S.fogX.createImageData(w, h);
-  for (let Y = 0; Y < h; Y++) for (let X = 0; X < w; X++) {
-    const o = (Y * w + X) * 4;
-    let v = ((X + Y) & 1) ? 16 : 11;
-    if (S.noise[Y * w + X] > 0.985) v = 30;
-    img.data[o] = v + 2; img.data[o + 1] = v - 2; img.data[o + 2] = v + 10; img.data[o + 3] = 255;
+// repaint a cell (and its neighbours, whose edges depend on it) after the ground changes
+function paintCell(i) {
+  const c = i % COLS, r = (i / COLS) | 0;
+  for (const [dc, dr] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const cc = c + dc, rr = r + dr;
+    if (cc < 0 || rr < 0 || cc >= COLS || rr >= ROWS) continue;
+    paintCellRaw(rr * COLS + cc);
   }
-  S.fogX.putImageData(img, 0, 0);
+  const S8 = CELL * R;
+  S.dirtX.putImageData(S.dirtImg, 0, 0, Math.max(0, (c - 1) * S8), Math.max(0, (r - 1) * S8), S8 * 3, S8 * 3);
 }
+// fog of war: a 1-pixel-per-cell mask, smoothed when drawn so revealed ground has soft edges
+function buildFog() {
+  S.fogC = mk(COLS, ROWS); S.fogX = S.fogC.getContext('2d');
+  S.fogX.fillStyle = '#000'; S.fogX.fillRect(0, 0, COLS, ROWS);
+  S.fogLayer = mk(TEX_W, TEX_H); S.fogDirty = true;
+}
+function drawFog() {
+  if (S.fogDirty) {
+    const g = S.fogLayer.getContext('2d');
+    g.globalCompositeOperation = 'copy';
+    g.drawImage(S.darkC, 0, 0);
+    g.globalCompositeOperation = 'destination-in';
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+    g.drawImage(S.fogC, 0, 0, TEX_W, TEX_H);
+    g.globalCompositeOperation = 'source-over';
+    S.fogDirty = false;
+  }
+  ctx.drawImage(S.fogLayer, 0, UG_TOP, W, ROWS * CELL);
+}
+function buildPipeLayer() {
+  S.pipeC = mk(W * R, (UG_BOT - SURF) * R); S.pipeX = S.pipeC.getContext('2d');
+  S.pipeReset = false;
+}
+
+// shaded gas giant with rings and an atmosphere halo; returns a 2x canvas
 function makePlanet(r) {
-  const c = mk(r * 2 + 1, r * 2 + 1), g = c.getContext('2d'), img = g.createImageData(c.width, c.height);
-  const cols = [[239, 125, 87], [177, 62, 83], [255, 205, 117], [60, 30, 70]];
-  for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) {
-    const nx = (x - r) / r, ny = (y - r) / r, d = nx * nx + ny * ny;
+  const pad = Math.round(r * 0.9), size = r * 2 + pad * 2, c = mk(size, size), g = c.getContext('2d');
+  const cx = size / 2, cy = size / 2;
+  const halo = g.createRadialGradient(cx, cy, r * 0.9, cx, cy, r * 1.35);
+  halo.addColorStop(0, 'rgba(255,170,120,0.35)'); halo.addColorStop(1, 'rgba(255,120,120,0)');
+  g.fillStyle = halo; g.fillRect(0, 0, size, size);
+  const ring = (front) => {
+    for (let a = 0; a < Math.PI * 2; a += 0.004) {
+      const sn = Math.sin(a), behind = sn < 0;
+      if (behind === front) continue;
+      for (let rr = r * 1.25; rr < r * 1.7; rr += 0.7) {
+        const x = cx + Math.cos(a) * rr, y = cy + sn * rr * 0.28;
+        const band = Math.sin(rr * 0.9) * 0.5 + 0.5;
+        g.fillStyle = `rgba(${200 + band * 40},${170 + band * 30},${150 + band * 30},${(0.25 + band * 0.4) * (front ? 1 : 0.7)})`;
+        g.fillRect(x | 0, y | 0, 1, 1);
+      }
+    }
+  };
+  ring(false);
+  const img = g.getImageData(0, 0, size, size);
+  const cols = [[255, 214, 140], [239, 125, 87], [190, 72, 92], [130, 44, 96]];
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const nx = (x - cx) / r, ny = (y - cy) / r, d = nx * nx + ny * ny;
     if (d > 1) continue;
     const nz = Math.sqrt(1 - d);
-    const b = Math.sin(ny * 14 + Math.sin(nx * 4) * 0.7);
-    let col = b > 0.5 ? cols[2] : b > -0.2 ? cols[0] : cols[1];
-    const l = -nx * 0.5 - ny * 0.4 + nz * 0.7 + (BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.5) * 0.25;
-    if (l < 0.15) col = cols[3]; else if (l < 0.35) col = col.map(v => (v * 0.65) | 0); else if (l > 0.95) col = col.map(v => Math.min(255, v + 30));
-    const o = (y * c.width + x) * 4;
-    img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
+    const turb = vnoise(nx * 4 + 10, ny * 9, 7) * 1.6 + vnoise(nx * 12, ny * 20, 9) * 0.5;
+    const b = (Math.sin(ny * 11 + turb * 2.2) + 1) / 2;
+    const bi = b * (cols.length - 1), i0 = Math.floor(bi), ft = bi - i0;
+    const a = cols[i0], bb = cols[Math.min(i0 + 1, cols.length - 1)];
+    let col = [a[0] + (bb[0] - a[0]) * ft, a[1] + (bb[1] - a[1]) * ft, a[2] + (bb[2] - a[2]) * ft];
+    const light = clamp(-nx * 0.55 - ny * 0.45 + nz * 0.75, 0, 1);
+    const k = 0.18 + 0.95 * light;
+    col = col.map(v => v * k);
+    const rim = Math.pow(1 - nz, 3) * clamp(-nx - ny * 0.5, 0, 1);
+    col = [col[0] + rim * 120, col[1] + rim * 90, col[2] + rim * 70];
+    const o = (y * size + x) * 4, al = clamp((1 - d) * r * 1.5, 0, 1);
+    img.data[o] = img.data[o] * (1 - al) + col[0] * al; img.data[o + 1] = img.data[o + 1] * (1 - al) + col[1] * al;
+    img.data[o + 2] = img.data[o + 2] * (1 - al) + col[2] * al; img.data[o + 3] = 255 * al + img.data[o + 3] * (1 - al);
   }
   g.putImageData(img, 0, 0);
+  ring(true);
+  c.pad = pad;
   return c;
 }
 let PLANET = null;
+function drawPlanet(x, y) {
+  if (!PLANET) PLANET = makePlanet(56);
+  ctx.drawImage(PLANET, x - PLANET.pad / R, y - PLANET.pad / R, PLANET.width / R, PLANET.height / R);
+}
+// soft nebula clouds for the space backdrop
+function paintNebula(g, w, h, rng, count) {
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  const cols = [[93, 39, 93], [37, 113, 121], [41, 54, 111], [120, 40, 140], [60, 30, 110]];
+  for (let k = 0; k < count; k++) {
+    const x = rng() * w, y = rng() * h * 0.8, rr = 60 + rng() * 170, c = cols[Math.floor(rng() * cols.length)];
+    const gr = g.createRadialGradient(x, y, 0, x, y, rr);
+    gr.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${0.16 + rng() * 0.14})`);
+    gr.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+    g.fillStyle = gr; g.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+  }
+  g.restore();
+}
+function paintStars(g, w, h, rng, count) {
+  const cols = ['#566c86', '#94b0c2', '#f4f4f4', '#73eff7', '#ffcd75', '#f3c6ff'];
+  for (let k = 0; k < count; k++) {
+    const x = (rng() * w) | 0, y = (rng() * h) | 0, c = cols[Math.floor(rng() * cols.length)], big = rng();
+    g.fillStyle = c;
+    if (big > 0.97) {
+      g.fillRect(x - 1, y, 3, 1); g.fillRect(x, y - 1, 1, 3);
+      g.globalAlpha = 0.45; g.fillRect(x - 3, y, 2, 1); g.fillRect(x + 2, y, 2, 1); g.fillRect(x, y - 3, 1, 2); g.fillRect(x, y + 2, 1, 2); g.globalAlpha = 1;
+    } else if (big > 0.85) g.fillRect(x, y, 2, 2);
+    else { g.globalAlpha = 0.5 + rng() * 0.5; g.fillRect(x, y, 1, 1); g.globalAlpha = 1; }
+  }
+}
 function buildSky() {
-  const h = UG_TOP;
-  S.skyC = mk(W, h);
+  const w = W * R, h = UG_TOP * R;
+  S.skyC = mk(w, h);
   const g = S.skyC.getContext('2d');
-  const img = g.createImageData(W, h);
-  const sky = ['#04040c', '#0a0818', '#120c24', '#1d1232'].map(rgb);
-  for (let y = 0; y < h; y++) for (let x = 0; x < W; x++) {
-    const lv = clamp(Math.floor((y / SURF) * 3 + BAYER[(y & 3) * 4 + (x & 3)] / 16), 0, 3);
-    const c = sky[lv], o = (y * W + x) * 4;
-    img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
-  }
-  g.putImageData(img, 0, 0);
+  const sky = g.createLinearGradient(0, 0, 0, SURF * R);
+  sky.addColorStop(0, '#04030c'); sky.addColorStop(0.45, '#0c0a24'); sky.addColorStop(0.8, '#22143e'); sky.addColorStop(1, '#3a1d4c');
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
   const rng = mulberry32(G.seed + G.sector * 31);
-  for (let k = 0; k < 170; k++) {
-    g.fillStyle = pick2(rng, ['#566c86', '#94b0c2', '#f4f4f4', '#73eff7', '#ffcd75']);
-    g.fillRect((rng() * W) | 0, (rng() * 86) | 0, 1, 1);
+  paintNebula(g, w, SURF * R, rng, 7);
+  paintStars(g, w, SURF * R - 20, rng, 260);
+  if (!PLANET) PLANET = makePlanet(56);
+  g.drawImage(PLANET, 790 + ((rng() * 140) | 0) - PLANET.pad, 30 - PLANET.pad);
+  // small moon
+  const mx = 300 + ((rng() * 120) | 0), my = 56;
+  for (let y = -6; y <= 6; y++) for (let x = -6; x <= 6; x++) {
+    const d = x * x + y * y; if (d > 36) continue;
+    const l = clamp(0.35 + (-x - y) * 0.06, 0.15, 1);
+    g.fillStyle = mixRGB([20, 22, 40], [196, 204, 222], l); g.fillRect(mx + x, my + y, 1, 1);
   }
-  if (!PLANET) PLANET = makePlanet(26);
-  g.drawImage(PLANET, 400 + ((rng() * 80) | 0), 18);
-  g.fillStyle = '#94b0c2'; g.fillRect(150 + ((rng() * 60) | 0), 30, 3, 3);
-  // ridges
-  const ridge = (base, amp, col, f) => {
-    g.fillStyle = col;
-    for (let x = 0; x < W; x++) {
-      const y = base - Math.abs(Math.sin(x * f + G.sector) * amp + Math.sin(x * f * 3.1) * amp * 0.4);
-      g.fillRect(x, y | 0, 1, SURF - (y | 0));
+  // three ridge layers, far to near
+  const seed = (G.seed + G.sector) | 0;
+  const ridge = (base, amp, f, top, bot, rim, s2) => {
+    for (let x = 0; x < w; x++) {
+      const y = Math.round(base * R - (Math.abs(Math.sin(x * f + s2)) * amp + vnoise(x / 40, s2, seed) * amp * 0.8) * R);
+      const gr = g.createLinearGradient(0, y, 0, SURF * R);
+      gr.addColorStop(0, top); gr.addColorStop(1, bot);
+      g.fillStyle = gr; g.fillRect(x, y, 1, SURF * R - y);
+      g.fillStyle = rim; g.fillRect(x, y, 1, 1);
     }
   };
-  ridge(92, 10, '#1d1430', 0.021);
-  ridge(97, 6, '#2a1d38', 0.05);
-  // ground crust
-  for (let x = 0; x < W; x++) {
-    g.fillStyle = '#8a6352'; g.fillRect(x, SURF, 1, 1);
-    g.fillStyle = '#6b4a3f'; g.fillRect(x, SURF + 1, 1, 1);
-    g.fillStyle = ((x * 7) % 5 === 0) ? '#4a3530' : '#5b4038'; g.fillRect(x, SURF + 2, 1, 2);
+  ridge(90, 11, 0.008, '#2a1b42', '#1a1230', '#4a3366', 1);
+  ridge(95, 7, 0.019, '#3a2340', '#241830', '#6a4458', 3);
+  ridge(99, 3, 0.05, '#4d2e3c', '#2e1d2c', '#8a5a5a', 5);
+  // regolith crust with pebbles
+  for (let x = 0; x < w; x++) {
+    const n = vnoise(x / 6, 0, seed);
+    g.fillStyle = mixRGB([176, 122, 92], [140, 96, 74], n); g.fillRect(x, SURF * R, 1, 1);
+    g.fillStyle = mixRGB([134, 92, 70], [108, 74, 60], n); g.fillRect(x, SURF * R + 1, 1, 2);
+    for (let y = SURF * R + 3; y < h; y++) {
+      const v = hash2(x, y, seed);
+      g.fillStyle = v > 0.94 ? '#a87a62' : v < 0.05 ? '#3c2a2c' : mixRGB([110, 76, 62], [82, 56, 50], (y - SURF * R) / 5 + v * 0.2);
+      g.fillRect(x, y, 1, 1);
+    }
+    if (hash2(x, 3, seed) > 0.985) { g.fillStyle = '#8a6a5a'; g.fillRect(x, SURF * R - 2, 3, 2); g.fillStyle = '#c09a82'; g.fillRect(x, SURF * R - 2, 2, 1); }
   }
 }
 function pick2(rng, a) { return a[Math.floor(rng() * a.length)]; }
@@ -999,7 +1189,8 @@ function reveal(c, r) {
   const i = r * COLS + c;
   if (S.rev[i]) return;
   S.rev[i] = 1;
-  S.fogX.clearRect(c * 4, r * 4, 4, 4);
+  S.fogX.clearRect(c, r, 1, 1);
+  S.fogDirty = true;
 }
 function revealAround(x, y, rad) {
   const c0 = Math.floor(x / CELL), r0 = Math.floor((y - UG_TOP) / CELL);
@@ -1010,9 +1201,9 @@ function plotAt(x) { return S.plots.find(p => x >= p.x0 && x < p.x1); }
 function myRigs() { return S.rigs.filter(r => r.owner === 'you'); }
 function msg(text, color = P.white) { S.msgs.unshift({ text, color, t: GT }); if (S.msgs.length > 4) S.msgs.pop(); }
 function float(x, y, text, color) { S.floats.push({ x, y, text, color, life: 1.8 }); }
-function part(x, y, vx, vy, life, color, g = 0, size = 1) { if (S.parts.length < 700) S.parts.push({ x, y, vx, vy, life, color, g, size }); }
+function part(x, y, vx, vy, life, color, g = 0, size = 1, glow = false) { if (S.parts.length < 700) S.parts.push({ x, y, vx, vy, life, color, g, size, glow }); }
 function explosion(x, y, n = 26) {
-  for (let k = 0; k < n; k++) part(x, y, (Math.random() - 0.5) * 90, -Math.random() * 70 - 10, 0.5 + Math.random() * 0.7, pick([P.yellow, P.orange, P.red, P.white]), 70, Math.random() < 0.3 ? 2 : 1);
+  for (let k = 0; k < n; k++) part(x, y, (Math.random() - 0.5) * 90, -Math.random() * 70 - 10, 0.5 + Math.random() * 0.7, pick([P.yellow, P.orange, P.red, P.white]), 70, Math.random() < 0.3 ? 1.5 : 1, true);
 }
 function dust(x, y) { for (let k = 0; k < 12; k++) part(x, y, (Math.random() - 0.5) * 40, -Math.random() * 20, 0.6, pick(['#8a6352', '#6b4a3f', P.lgray]), 30); }
 function spend(v) { G.credits -= v; S.stats.spent += v; }
@@ -1152,7 +1343,7 @@ function updateDrill(r, dt) {
   if (s.status === 'drill' && s.prog >= s.len - 1e-6) s.status = 'done';
   if (s.status === 'drill' && Math.random() < 0.35) {
     const x = s.x1 + s.ux * s.prog, y = s.y1 + s.uy * s.prog;
-    part(x, y, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, 0.25, pick([P.yellow, P.white, P.orange]));
+    part(x, y, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, 0.25, pick([P.yellow, P.white, P.orange]), 0, 0.5, true);
   }
 }
 
@@ -1205,14 +1396,23 @@ function buyPlot(p) {
 }
 function buyHauler() {
   if (!afford(COST.hauler)) return;
-  spend(COST.hauler);
-  spawnHauler();
+  S.hpick = !S.hpick; S.tool = null;
+  sfx('click');
 }
-function spawnHauler() {
-  const h = { kind: 'hauler', id: S.nid++, x: 320 + (Math.random() * 40 - 20), y: -8, cargo: 0, state: 'idle', target: null, home: null,
-    dir: 1, wait: 0, sale: 0, idleX: 260 + Math.random() * 120, idleY: 40 + Math.random() * 14, moving: false };
+function buyHaulerSide(side) {
+  S.hpick = false;
+  if (!afford(COST.hauler)) return;
+  spend(COST.hauler);
+  spawnHauler(side);
+  msg('HAULER LAUNCHED - SELLING AT ' + S.stations[side].name, P.cyan);
+}
+function spawnHauler(side) {
+  if (side == null) side = S.haulers.filter(h => h.side === 0).length <= S.haulers.filter(h => h.side === 1).length ? 0 : 1;
+  const sx = S.stations[side].x;
+  const h = { kind: 'hauler', id: S.nid++, side, x: sx + (side ? -40 : 40), y: -8, cargo: 0, state: 'idle', target: null,
+    dir: side ? -1 : 1, wait: 0, sale: 0, think: 0.3, idleX: 0, idleY: 0, moving: false };
+  park(h);
   S.haulers.push(h);
-  S.sel = { kind: 'hauler', ref: h };
   sfx('buy');
   if (S.haulers.length >= 8) unlock('fleet');
 }
@@ -1231,6 +1431,7 @@ function scrapRig(r) {
   r.dead = true;
   S.rigs = S.rigs.filter(x => x !== r);
   for (const id of r.segs) S.segs[id].status = 'gone';
+  S.pipeReset = true;
   G.credits += refund; S.stats.spent -= refund;
   relink();
   S.sel = null;
@@ -1291,42 +1492,84 @@ function flyTo(h, tx, ty, dt) {
   h.moving = Math.abs(vx) + Math.abs(vy) > 0.01;
   return Math.abs(tx - h.x) < 0.5 && Math.abs(ty - h.y) < 0.5;
 }
-function bestStation() {
-  const open = S.stations.filter(s => s.closed <= 0);
-  if (!open.length) return null;
-  return open.reduce((a, b) => price(a) >= price(b) ? a : b);
+// haulers are automatic: each one is assigned a side (0 = HELIX, 1 = NOVA), fetches crude from
+// whichever of your rigs/silos has the most unclaimed crude, and sells it at its side's station
+function sellTarget(h) {
+  const own = S.stations[h.side], other = S.stations[1 - h.side];
+  if (has('auto') && other.closed <= 0 && (own.closed > 0 || price(other) > price(own) * 1.1)) return other;
+  if (own.closed <= 0) return own;
+  return other.closed <= 0 ? other : null;
 }
-function autoSell(h) { const s = bestStation(); if (!s) { h.state = 'full'; return; } h.target = s; h.state = 'toSell'; }
-function cmdLoad(h, b) { h.target = b; h.home = b; h.state = 'toLoad'; h.wait = 0; sfx('click'); }
-function cmdSell(h, s) {
-  if (s.closed > 0) { msg(s.name + ' IS CLOSED (' + s.closed + ' DAYS)', P.red); sfx('err'); return; }
-  if (h.cargo <= 0) msg('THAT HAULER IS EMPTY', P.lgray);
-  h.target = s; h.state = 'toSell'; sfx('click');
+function pickSource(h) {
+  const room = st.hCap() - h.cargo;
+  let best = null, bs = 0;
+  for (const b of [...myRigs(), ...S.silos]) {
+    let claimed = 0;
+    for (const o of S.haulers) if (o !== h && o.target === b && (o.state === 'toLoad' || o.state === 'loading')) claimed += st.hCap() - o.cargo;
+    const avail = b.tank - claimed;
+    if (avail < Math.min(6, room)) continue;
+    const sc = Math.min(avail, room) * 10 - Math.abs(b.x - h.x) * 0.05 + (b.kind === 'silo' ? 5 : 0);
+    if (sc > bs) { bs = sc; best = b; }
+  }
+  return best;
+}
+function park(h) {
+  const s = S.stations[h.side];
+  h.idleX = s.x + (h.side ? -1 : 1) * (36 + (h.id % 4) * 7);
+  h.idleY = CRUISE - 8 + (h.id % 3) * 5;
+}
+function goSell(h) {
+  const s = sellTarget(h);
+  if (!s) { h.state = 'idle'; h.target = null; park(h); return; }
+  h.target = s; h.state = 'toSell';
+}
+function setSide(h, side) {
+  if (h.side === side) return;
+  h.side = side;
+  park(h);
+  if (h.state === 'toSell' || h.state === 'idle') { h.state = 'idle'; h.target = null; h.think = 0; }
+  msg('HAULER NOW SELLS AT ' + S.stations[side].name, P.cyan);
+  sfx('click');
 }
 function updateHauler(h, dt) {
-  if (h.target && h.target.dead) { h.target = null; h.state = 'idle'; }
-  if (h.home && h.home.dead) h.home = null;
+  if (h.target && h.target.dead) { h.target = null; if (h.cargo > 0) goSell(h); else h.state = 'idle'; }
   h.moving = false;
+  h.think -= dt;
   switch (h.state) {
-    case 'idle': flyTo(h, h.idleX, h.idleY, dt); break;
-    case 'toLoad': { const [tx, ty] = dock(h.target); if (flyTo(h, tx, ty, dt)) { h.state = 'loading'; h.wait = 0; } break; }
-    case 'loading': case 'full': {
-      const b = h.target; const [tx, ty] = dock(b); flyTo(h, tx, ty, dt);
-      const cap = st.hCap(), room = cap - h.cargo;
-      if (room <= 0.01) { h.cargo = cap; if (has('auto')) autoSell(h); else h.state = 'full'; break; }
-      h.state = 'loading';
-      const u = Math.min(18 * st.hRate() * dt, room, b.tank);
-      if (u > 0.0001) { b.tank -= u; h.cargo += u; h.wait = 0; }
-      else { h.wait += dt; if (has('auto') && h.cargo > 0 && h.wait > 2.5) autoSell(h); }
+    case 'idle': {
+      flyTo(h, h.idleX, h.idleY, dt);
+      if (h.think > 0) break;
+      h.think = 0.5;
+      if (h.cargo >= st.hCap() * 0.5 && sellTarget(h)) { goSell(h); break; }
+      const src = pickSource(h);
+      if (src) { h.target = src; h.state = 'toLoad'; }
+      else if (h.cargo > 0) goSell(h);
       break;
     }
-    case 'toSell': { const [tx, ty] = dock(h.target); if (flyTo(h, tx, ty, dt)) h.state = 'selling'; break; }
+    case 'toLoad': { const [tx, ty] = dock(h.target); if (flyTo(h, tx, ty, dt)) { h.state = 'loading'; h.wait = 0; } break; }
+    case 'loading': {
+      const b = h.target; const [tx, ty] = dock(b); flyTo(h, tx, ty, dt);
+      const cap = st.hCap(), room = cap - h.cargo;
+      if (room <= 0.01) { h.cargo = cap; goSell(h); break; }
+      const u = Math.min(18 * st.hRate() * dt, room, b.tank);
+      if (u > 0.0001) { b.tank -= u; h.cargo += u; h.wait = 0; break; }
+      h.wait += dt;
+      if (h.wait < 1.2) break;
+      if (h.cargo >= cap * 0.35) { goSell(h); break; }
+      const src = pickSource(h);
+      if (src && src !== b) { h.target = src; h.state = 'toLoad'; }
+      else if (h.wait > 4 && h.cargo > 0) goSell(h);
+      break;
+    }
+    case 'toSell': {
+      if (h.target.closed > 0) { goSell(h); if (h.state !== 'toSell') break; }
+      const [tx, ty] = dock(h.target);
+      if (flyTo(h, tx, ty, dt)) h.state = 'selling';
+      break;
+    }
     case 'selling': {
       const s = h.target;
-      if (s.closed > 0) {
-        msg(s.name + ' IS CLOSED!', P.red);
-        h.state = 'idle'; h.idleX = s.x + (s.x < 320 ? 34 : -34); h.idleY = CRUISE - 6; break;
-      }
+      if (s.closed > 0) { goSell(h); break; }
       const u = Math.min(25 * st.hRate() * dt, h.cargo);
       const v = u * price(s);
       h.cargo -= u; h.sale += v;
@@ -1337,13 +1580,12 @@ function updateHauler(h, dt) {
         h.cargo = 0;
         if (h.sale > 0.5) { float(h.x, h.y - 10, '+$' + fmt(h.sale), P.yellow); sfx('cash'); }
         h.sale = 0;
-        if (has('auto') && h.home && !h.home.dead) { h.target = h.home; h.state = 'toLoad'; }
-        else { h.state = 'idle'; h.target = null; h.idleX = s.x + (s.x < 320 ? 30 : -30) + Math.random() * 16 - 8; h.idleY = CRUISE - 4 + Math.random() * 8; }
+        h.state = 'idle'; h.target = null; h.think = 0; park(h);
       }
       break;
     }
   }
-  if (h.moving && Math.random() < 0.35) part(h.x - h.dir * 6, h.y, -h.dir * 25, (Math.random() - 0.5) * 8, 0.3, pick([P.orange, P.yellow]));
+  if (h.moving && Math.random() < 0.35) part(h.x - h.dir * 6, h.y, -h.dir * 25, (Math.random() - 0.5) * 8, 0.3, pick([P.orange, P.yellow]), 0, 1, true);
 }
 function updateScans(dt) {
   for (const sc of S.scans) {
@@ -1375,13 +1617,14 @@ function rivalDaily(d) {
     const R = S.rv[id], info = RIVALS[id];
     if (d >= R.nextBuy) {
       const free = S.plots.filter(p => !p.owner);
-      if (free.length && S.bribe <= 0) {
+      const mine = S.plots.filter(p => p.owner === id).length, allRival = S.plots.filter(p => isRival(p.owner)).length;
+      if (free.length && S.bribe <= 0 && mine < (id === 'syn' ? 3 : 2) && allRival < 3) {
         free.sort((a, b) => b.oil - a.oil);
         const p = Math.random() < 0.6 ? free[0] : pick(free);
         p.owner = id;
         msg(info.name + ' BOUGHT PLOT ' + (p.i + 1), info.col); sfx('alert');
         if (Math.random() < 0.6) taunt(id);
-        R.queue.push({ day: d + 2 + Math.random() * 3, plot: p.i }, { day: d + 12 + Math.random() * 6, plot: p.i });
+        R.queue.push({ day: d + 2 + Math.random() * 3, plot: p.i });
       }
       const gap = id === 'syn' ? 12 : 22;
       R.nextBuy = d + (G.sector === 1 ? gap + 8 : gap) + Math.random() * 10;
@@ -1434,7 +1677,7 @@ function rivalDrill(r) {
   for (const p of S.pockets) {
     if (p.amt <= 1 || r.tried.has(p.id)) continue;
     const dx = Math.abs(p.cx - r.x);
-    if (dx > 150) continue;
+    if (dx > 90) continue;
     const sc = dx + (p.cy - SURF) * 0.7 + Math.random() * 20;
     if (sc < bs) { bs = sc; best = p; }
   }
@@ -1539,17 +1782,48 @@ function update(dt) {
   for (const r of S.rigs) if (r.offline > 0 && Math.random() < 0.15) part(r.x + (Math.random() - 0.5) * 4, SURF - 24, (Math.random() - 0.5) * 6, -15, 1.2, pick([P.dgray, P.gray]));
 }
 
-// ---------------------------------------------------------------- UI primitives
-function panel(x, y, w, h, bg = P.navy, edge = P.gray) { rect(x, y, w, h, edge); rect(x + 1, y + 1, w - 2, h - 2, bg); }
+// ---------------------------------------------------------------- UI primitives (16-bit style windows)
+function panel(x, y, w, h, bg = P.navy, edge = P.gray) {
+  const X = Math.round(x * R), Y = Math.round(y * R), Wd = Math.round(w * R), Ht = Math.round(h * R);
+  q(X, Y, Wd, Ht, '#04050b');
+  q(X + 1, Y + 1, Wd - 2, Ht - 2, edge);
+  q(X + 1, Y + 1, Wd - 2, 1, shade(edge, 0.5));
+  q(X + 2, Y + 2, Wd - 4, Ht - 4, '#04050b');
+  const g = ctx.createLinearGradient(0, (Y + 3) / R, 0, (Y + Ht - 3) / R);
+  g.addColorStop(0, shade(bg, 0.2)); g.addColorStop(1, shade(bg, -0.35));
+  ctx.fillStyle = g; ctx.fillRect((X + 3) / R, (Y + 3) / R, (Wd - 6) / R, (Ht - 6) / R);
+  q(X + 3, Y + 3, Wd - 6, 1, 'rgba(255,255,255,0.12)');
+}
 function button(x, y, w, h, label, fn, o = {}) {
   const dis = !!o.disabled, hov = !dis && inRect(mouse, x, y, w, h);
-  rect(x, y, w, h, P.black);
-  rect(x + 1, y + 1, w - 2, h - 2, dis ? P.dgray : hov ? (o.hc || P.blue) : (o.color || P.dblue));
-  rect(x + 1, y + 1, w - 2, 1, dis ? P.gray : P.lgray);
-  rect(x + 1, y + h - 2, w - 2, 1, P.navy);
-  if (o.active) { rect(x, y, w, 1, P.yellow); rect(x, y + h - 1, w, 1, P.yellow); rect(x, y, 1, h, P.yellow); rect(x + w - 1, y, 1, h, P.yellow); }
-  txt(label, x + w / 2, y + ((h - 5) >> 1), dis ? P.gray : (o.tc || P.white), o.scale || 1, 'c');
+  const base = dis ? '#2b3047' : hov ? (o.hc || P.blue) : (o.color || P.dblue);
+  const X = Math.round(x * R), Y = Math.round(y * R), Wd = Math.round(w * R), Ht = Math.round(h * R);
+  q(X, Y, Wd, Ht, o.active ? P.yellow : '#04050b');
+  const g = ctx.createLinearGradient(0, (Y + 1) / R, 0, (Y + Ht - 1) / R);
+  g.addColorStop(0, shade(base, 0.28)); g.addColorStop(1, shade(base, -0.3));
+  ctx.fillStyle = g; ctx.fillRect((X + 1) / R, (Y + 1) / R, (Wd - 2) / R, (Ht - 2) / R);
+  q(X + 1, Y + 1, Wd - 2, 1, shade(base, dis ? 0.15 : 0.6));
+  q(X + 1, Y + Ht - 2, Wd - 2, 1, shade(base, -0.55));
+  if (o.active) q(X + 1, Y + 1, Wd - 2, 1, '#fff3c0');
+  txtS(label, x + w / 2, y + ((h - 5) >> 1), dis ? P.gray : (o.tc || P.white), o.scale || 1, 'c');
   BTN.push({ x, y, w, h, fn: dis ? null : fn });
+}
+function hudBar(y, h) {
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, '#2c3672'); g.addColorStop(0.5, '#1b2350'); g.addColorStop(1, '#10152f');
+  ctx.fillStyle = g; ctx.fillRect(0, y, W, h);
+  q(0, y * R, W * R, 1, '#5a6cb0');
+  q(0, (y + h) * R - 1, W * R, 1, '#05060c');
+}
+function meter(x, y, w, h, f, col) {
+  const X = Math.round(x * R), Y = Math.round(y * R), Wd = Math.round(w * R), Ht = Math.round(h * R), fw = Math.round((Wd - 2) * clamp(f, 0, 1));
+  q(X, Y, Wd, Ht, '#04050b');
+  q(X + 1, Y + 1, Wd - 2, Ht - 2, '#161a2e');
+  if (fw > 0) {
+    q(X + 1, Y + 1, fw, Ht - 2, col);
+    q(X + 1, Y + 1, fw, 1, shade(col, 0.5));
+    q(X + 1, Y + Ht - 2, fw, 1, shade(col, -0.4));
+  }
 }
 function brackets(x, y, w, h, c) {
   rect(x, y, 3, 1, c); rect(x, y, 1, 3, c); rect(x + w - 3, y, 3, 1, c); rect(x + w - 1, y, 1, 3, c);
@@ -1557,139 +1831,233 @@ function brackets(x, y, w, h, c) {
 }
 const blink = () => ((GT * 3) | 0) % 2 === 0;
 
-// ---------------------------------------------------------------- sprites
+// ---------------------------------------------------------------- sprites (drawn in 2x pixels)
+const STEEL_D = [52, 62, 88], STEEL_L = [184, 198, 222];
 function drawRig(r, baseY = SURF) {
-  const x = Math.round(r.x), y = baseY;
-  const mine = r.owner === 'you', rival = isRival(r.owner);
-  const fr = r.offline > 0 ? P.gray : rival ? rcol(r.owner) : P.lgray;
-  const sd = rival ? RIVALS[r.owner].dark : P.gray;
-  rect(x - 6, y - 3, 13, 3, P.dgray); rect(x - 6, y - 3, 13, 1, sd);
-  for (let k = 0; k < 18; k++) {
-    const hw = Math.round(5 - k * 3.2 / 18);
-    rect(x - hw, y - 4 - k, 1, 1, fr); rect(x + hw, y - 4 - k, 1, 1, fr);
-    if (k % 5 === 2) rect(x - hw + 1, y - 4 - k, hw * 2 - 1, 1, sd);
-    else if (k % 5 === 4) rect(x - hw + 1 + ((k * 3) % (hw * 2 - 1 || 1)), y - 4 - k, 1, 1, sd);
+  const X = Math.round(r.x * R), Y = baseY * R;
+  const rival = isRival(r.owner), mine = r.owner === 'you', off = r.offline > 0;
+  const fr = off ? '#6b7080' : rival ? rcol(r.owner) : '#a9bbcf';
+  const frL = shade(fr, 0.4), frD = shade(fr, -0.45), frM = shade(fr, -0.2);
+  q(X - 17, Y - 1, 34, 2, 'rgba(0,0,0,0.4)');
+  // skid with hazard stripes
+  q(X - 14, Y - 8, 28, 7, '#3a4258'); q(X - 14, Y - 8, 28, 1, '#8b9bc0'); q(X - 14, Y - 2, 28, 1, '#1c2032');
+  for (let row = 0; row < 3; row++) for (let i = 0; i < 24; i++) q(X - 12 + i, Y - 6 + row, 1, 1, ((i + row) >> 1) & 1 ? '#ffcd75' : '#1a1c2c');
+  // lattice tower
+  for (let k = 0; k < 40; k++) {
+    const yy = Y - 9 - k, hw = Math.round(11 - k * 7 / 40);
+    q(X - hw - 1, yy, 2, 1, frL); q(X + hw - 1, yy, 2, 1, frD);
+    if (k % 10 === 0) q(X - hw + 1, yy, hw * 2 - 2, 1, frM);
+    else {
+      const t = (k % 10) / 10, span = hw * 2 - 3;
+      q(X - hw + 1 + Math.round(t * span), yy, 1, 1, frM);
+      q(X + hw - 2 - Math.round(t * span), yy, 1, 1, frD);
+    }
   }
-  rect(x - 3, y - 23, 7, 2, fr); rect(x, y - 26, 1, 3, fr);
+  // crown block + mast
+  q(X - 7, Y - 54, 14, 5, fr); q(X - 7, Y - 54, 14, 1, frL); q(X - 7, Y - 50, 14, 1, frD); q(X + 5, Y - 53, 2, 3, frD);
+  q(X - 1, Y - 61, 2, 7, frM); q(X - 1, Y - 61, 1, 7, frL);
   const on = ((GT * 2 + r.id * 0.37) % 2) < 1;
-  rect(x, y - 27, 1, 1, r.offline > 0 ? P.red : on ? (rival ? P.orange : P.lime) : P.dgray);
-  const off = r.pumping ? Math.round(Math.sin(GT * 8 + r.id) * 2) : 0;
-  rect(x - 1, y - 12 + off, 3, 5, rival ? P.orange : P.yellow);
-  rect(x, y - 16 + off, 1, 4, P.lgray);
+  const bc = off ? '#ff5a6a' : rival ? '#ef7d57' : '#a7f070';
+  q(X - 1, Y - 63, 2, 2, on || off ? bc : '#333c57');
+  if (on || off) glow((X) / R, (Y - 62) / R, 7, bc, 0.9);
+  // pump jack (bobs while pumping)
+  const po = r.pumping ? Math.round(Math.sin(GT * 8 + r.id) * 3) : 0;
+  const pc = rival ? shade(rcol(r.owner), 0.3) : '#ffcd75';
+  q(X - 1, Y - 38 + po, 2, 12, '#d6e0f0');
+  q(X - 5, Y - 27 + po, 10, 9, pc); q(X - 5, Y - 27 + po, 10, 1, shade(pc, 0.6)); q(X + 3, Y - 26 + po, 2, 8, shade(pc, -0.4));
+  q(X - 2, Y - 17, 4, 9, '#566c86'); q(X - 2, Y - 17, 1, 9, '#8b9bc0');
   if (mine) {
-    const cap = st.rigCap(), f = clamp(r.tank / cap, 0, 1);
-    rect(x + 7, y - 18, 3, 16, P.black);
-    const fh = Math.round(14 * f);
-    rect(x + 8, y - 3 - fh, 1, fh, f >= 0.999 ? P.crudeG : P.crude);
-    if (f >= 0.999 && blink()) txtS('FULL', x + 1, y - 35, P.orange, 1, 'c');
+    const cap = st.rigCap(), f = clamp(r.tank / cap, 0, 1), fh = Math.round(29 * f);
+    q(X + 14, Y - 39, 7, 33, '#04050b'); q(X + 15, Y - 38, 5, 31, '#1a1426');
+    if (fh) { q(X + 15, Y - 7 - fh, 5, fh, '#9b30d9'); q(X + 15, Y - 7 - fh, 1, fh, '#c46cff'); q(X + 15, Y - 7 - fh, 5, 1, '#f3c6ff'); }
+    q(X + 19, Y - 38, 1, 31, 'rgba(255,255,255,0.14)');
+    if (f >= 0.999) { glow((X + 17) / R, (Y - 22) / R, 9, '#d77bff', 0.45 + 0.25 * Math.sin(GT * 6)); if (blink()) txtS('FULL', r.x + 1, baseY - 37, P.orange, 1, 'c'); }
   }
-  if (r.offline > 0 && blink()) txtS('OFFLINE', x, y - 35, P.red, 1, 'c');
+  if (off && blink()) txtS('OFFLINE', r.x, baseY - 37, P.red, 1, 'c');
+}
+function cylinder(X, Y, w, h, dark, light) {
+  for (let i = 0; i < w; i++) {
+    const l = clamp(Math.cos(((i + 0.5) / w - 0.35) * Math.PI) * 0.95, 0, 1);
+    q(X + i, Y, 1, h, mixRGB(dark, light, l));
+  }
 }
 function drawSilo(s) {
-  const x = s.x | 0, y = SURF;
-  rect(x - 7, y - 11, 14, 11, P.gray); rect(x - 6, y - 13, 12, 2, P.gray); rect(x - 4, y - 14, 8, 1, P.gray);
-  rect(x - 6, y - 11, 1, 10, P.lgray); rect(x - 5, y - 13, 4, 1, P.lgray);
-  rect(x - 7, y - 6, 14, 1, P.dgray);
-  rect(x - 1, y - 11, 3, 10, P.black);
-  const f = clamp(s.tank / st.siloCap(), 0, 1), fh = Math.round(9 * f);
-  rect(x, y - 2 - fh + 1, 1, fh, f >= 0.999 ? P.crudeG : P.crude);
+  const X = Math.round(s.x * R), Y = SURF * R;
+  q(X - 17, Y - 1, 34, 2, 'rgba(0,0,0,0.4)');
+  cylinder(X - 14, Y - 23, 28, 22, STEEL_D, STEEL_L);
+  [26, 24, 21, 17, 12, 6].forEach((w2, k) => cylinder(X - (w2 >> 1), Y - 24 - k, w2, 1, STEEL_D, STEEL_L));
+  q(X - 14, Y - 17, 28, 1, 'rgba(0,0,0,0.35)'); q(X - 14, Y - 9, 28, 1, 'rgba(0,0,0,0.35)');
+  q(X - 14, Y - 16, 28, 1, 'rgba(255,255,255,0.12)'); q(X - 14, Y - 8, 28, 1, 'rgba(255,255,255,0.12)');
+  const f = clamp(s.tank / st.siloCap(), 0, 1), fh = Math.round(17 * f);
+  q(X - 3, Y - 22, 6, 19, '#04050b'); q(X - 2, Y - 21, 4, 17, '#1a1426');
+  if (fh) { q(X - 2, Y - 4 - fh, 4, fh, '#9b30d9'); q(X - 2, Y - 4 - fh, 4, 1, '#f3c6ff'); }
+  q(X + 1, Y - 21, 1, 17, 'rgba(255,255,255,0.15)');
+  if (f >= 0.999) glow(s.x, SURF - 6, 8, '#d77bff', 0.35);
 }
 function drawStation(s) {
-  const x = s.x | 0, y = SURF, flip = s.x > 320 ? -1 : 1;
-  rect(x - 22, y - 22, 44, 22, P.dgray); rect(x - 22, y - 22, 44, 1, P.gray);
-  for (let k = 0; k < 6; k++) rect(x - 18 + k * 7, y - 18, 3, 2, ((k + ((GT * 0.7) | 0)) % 4) ? P.yellow : P.navy);
-  rect(x - 7, y - 31, 14, 9, P.gray); rect(x - 7, y - 31, 14, 1, P.lgray);
-  rect(x - 13, y - 33, 26, 2, s.closed > 0 ? P.red : P.lgray);
-  if (blink()) { rect(x - 13, y - 34, 1, 1, P.lime); rect(x + 12, y - 34, 1, 1, P.lime); }
-  rect(x + 14 * flip - 3, y - 30, 7, 8, P.teal); rect(x + 14 * flip - 2, y - 31, 5, 1, P.teal);
-  rect(x - 16 * flip, y - 42, 1, 20, P.lgray); rect(x - 16 * flip, y - 43, 1, 1, ((GT * 1.5) | 0) % 2 ? P.red : P.dgray);
-  txt(s.name, x, y - 10, s.closed > 0 ? P.red : P.cyan, 1, 'c');
+  const X = Math.round(s.x * R), Y = SURF * R, flip = s.x > 320 ? -1 : 1, closed = s.closed > 0;
+  q(X - 50, Y - 1, 100, 2, 'rgba(0,0,0,0.4)');
+  // storage tank
+  cylinder(X + 26 * flip - 9, Y - 32, 18, 31, [24, 70, 78], [120, 210, 214]);
+  q(X + 26 * flip - 9, Y - 33, 18, 1, '#9fe8ec');
+  // main hall
+  for (let row = 0; row < 44; row++) q(X - 40, Y - 44 + row, 80, 1, mixRGB([70, 82, 120], [30, 36, 56], row / 43));
+  for (let i = 1; i < 8; i++) q(X - 40 + i * 10, Y - 44, 1, 44, 'rgba(0,0,0,0.25)');
+  q(X - 40, Y - 44, 80, 1, '#9fb0d8'); q(X - 40, Y - 44, 1, 44, '#7584ad');
+  for (let k = 0; k < 6; k++) {
+    const lit = ((k * 7 + ((GT * 0.6) | 0)) % 5) !== 0;
+    const wx = X - 34 + k * 12, wy = Y - 38;
+    q(wx, wy, 7, 5, lit ? '#ffcd75' : '#151a2a'); if (lit) { q(wx, wy, 7, 1, '#fff3c0'); glow((wx + 3) / R, (wy + 2) / R, 4, '#ffcd75', 0.25); }
+  }
+  // hangar door with hazard trim
+  q(X - 12, Y - 20, 24, 19, '#141828');
+  for (let i = 0; i < 24; i++) q(X - 12 + i, Y - 22, 1, 2, (i >> 1) & 1 ? '#ffcd75' : '#1a1c2c');
+  for (let k = 0; k < 5; k++) q(X - 12, Y - 18 + k * 4, 24, 1, '#232a42');
+  // landing pad tower
+  q(X - 12, Y - 64, 24, 20, '#56627e'); q(X - 12, Y - 64, 3, 20, '#8b9bc0'); q(X + 9, Y - 64, 3, 20, '#333c57');
+  q(X - 26, Y - 68, 52, 4, closed ? '#b13e53' : '#c2cbe0'); q(X - 26, Y - 68, 52, 1, '#f4f4f4'); q(X - 26, Y - 64, 52, 1, '#333c57');
+  const pl = blink();
+  for (const ex of [-25, 23]) { q(X + ex, Y - 70, 2, 2, pl ? (closed ? '#ff5a6a' : '#a7f070') : '#333c57'); if (pl) glow((X + ex + 1) / R, (Y - 69) / R, 5, closed ? '#ff5a6a' : '#a7f070', 0.8); }
+  // flare stack with flame
+  const fx = X - 34 * flip;
+  q(fx - 2, Y - 80, 4, 36, '#8b9bc0'); q(fx - 2, Y - 80, 1, 36, '#c7d2e2');
+  const fl = 4 + Math.round(Math.sin(GT * 14 + s.x) * 2 + Math.sin(GT * 23) * 1.5);
+  q(fx - 2, Y - 82 - fl, 4, fl, '#ef7d57'); q(fx - 1, Y - 81 - Math.round(fl * 0.7), 2, Math.round(fl * 0.7), '#ffcd75');
+  glow(fx / R, (Y - 84) / R, 10, '#ef7d57', 0.55 + 0.15 * Math.sin(GT * 9));
+  // neon sign
+  txtS(s.name, s.x, SURF - 15, closed ? P.red : P.cyan, 1, 'c');
+  glow(s.x, SURF - 13, 14, closed ? '#b13e53' : '#41a6f6', 0.2);
 }
 function drawHauler(h) {
-  const bob = (h.state === 'idle' || h.state === 'full' || h.state === 'loading') ? Math.round(Math.sin(GT * 3 + h.id)) : 0;
-  const x = Math.round(h.x), y = Math.round(h.y) + bob, d = h.dir;
-  rect(x - 5, y - 2, 10, 4, P.lgray); rect(x - 5, y + 1, 10, 1, P.gray); rect(x - 6, y - 1, 1, 2, P.gray);
-  rect(x + (d > 0 ? 2 : -5), y - 2, 3, 2, P.sky);
-  const f = clamp(h.cargo / (G ? st.hCap() : 20), 0, 1);
-  rect(x - 4, y + 2, 8, 2, P.black); rect(x - 4, y + 2, Math.round(8 * f), 2, f >= 0.999 ? P.crudeG : P.crude);
-  if (h.moving) rect(x + (d > 0 ? -7 : 5), y - 1, 2, 2, ((GT * 20) | 0) % 2 ? P.orange : P.yellow);
-  if (h.state === 'full' && blink()) txtS('FULL', x, y - 10, P.orange, 1, 'c');
-  if (h.state === 'loading' && h.wait > 1 && blink()) txtS('...', x, y - 10, P.lgray, 1, 'c');
+  const bob = (h.state === 'idle' || h.state === 'loading') ? Math.round(Math.sin(GT * 3 + h.id) * 2) : 0;
+  const X = Math.round(h.x * R), Yb = Math.round(h.y * R) + bob, d = h.dir || 1;
+  const hq = (dx, dy, w, hh, c) => q(d > 0 ? X + dx : X - dx - w, Yb + dy, w, hh, c);
+  const side = h.side === 1 ? '#ffcd75' : '#73eff7';
+  hq(-12, -7, 4, 4, '#566c86'); hq(-12, -7, 4, 1, '#94b0c2');
+  hq(-11, -3, 20, 6, '#8b9bc0'); hq(-11, -4, 18, 1, '#d6e0f0'); hq(-11, -3, 20, 1, '#b4c2dc'); hq(-11, 2, 20, 1, '#4a5672');
+  hq(9, -2, 3, 4, '#8b9bc0'); hq(12, -1, 1, 2, '#d6e0f0');
+  hq(3, -3, 6, 3, '#41a6f6'); hq(4, -3, 3, 1, '#c8ecff');
+  hq(-9, 0, 11, 1, side);
+  hq(-13, -2, 2, 4, '#333c57');
+  const f = clamp(h.cargo / (G ? st.hCap() : 20), 0, 1), cw = Math.round(14 * f);
+  hq(-7, 3, 14, 4, '#1a1426'); hq(-7, 3, 14, 1, '#3a2f4a');
+  if (cw) { hq(-7, 3, cw, 4, '#9b30d9'); hq(-7, 3, cw, 1, '#e3a8ff'); }
+  if (((GT * 2 + h.id) % 2) < 1) hq(-12, -8, 1, 1, '#ff5a6a');
+  if (h.moving) {
+    const L = 4 + ((GT * 30) | 0) % 3 * 2;
+    hq(-13 - L, -1, L, 2, '#ef7d57'); hq(-13 - (L >> 1), -1, L >> 1, 2, '#fff3c0');
+    glow((d > 0 ? X - 16 : X + 16) / R, Yb / R, 7, '#ef7d57', 0.7);
+  }
+  if (h.state === 'loading' && h.wait > 1 && blink()) txtS('...', h.x, h.y - 10, P.lgray, 1, 'c');
 }
 function drawScanner(sc) {
-  const x = sc.x | 0, y = SURF;
-  rect(x - 2, y - 3, 1, 3, P.gray); rect(x + 2, y - 3, 1, 3, P.gray); rect(x, y - 5, 1, 3, P.lgray);
-  rect(x - 2, y - 7, 5, 2, P.lgray); rect(x - 1, y - 8, 3, 1, P.lgray);
-  rect(x, y - 9, 1, 1, sc.done ? P.dgray : (blink() ? P.cyan : P.white));
+  const X = Math.round(sc.x * R), Y = SURF * R;
+  q(X - 6, Y - 6, 2, 6, '#566c86'); q(X + 4, Y - 6, 2, 6, '#566c86');
+  q(X - 1, Y - 10, 2, 6, '#94b0c2');
+  q(X - 6, Y - 14, 12, 1, '#d6e0f0'); q(X - 5, Y - 13, 10, 1, '#94b0c2'); q(X - 4, Y - 12, 8, 1, '#566c86');
+  q(X, Y - 18, 1, 4, '#d6e0f0');
+  const live = !sc.done;
+  q(X - 1, Y - 20, 2, 2, live ? (blink() ? '#73eff7' : '#f4f4f4') : '#333c57');
+  if (live) glow(sc.x, SURF - 10, 6, '#73eff7', 0.7);
 }
 
 // ---------------------------------------------------------------- world render
+const CRUDE_RAMP = ['#f8c8ff', '#d87cff', '#b04af0', '#9230d6', '#7824ba', '#601c9c', '#4c147e'];
 function drawOil() {
-  const tick = (GT * 6) | 0;
+  const S8 = CELL * R;
   for (const p of S.pockets) {
     if (p.amt <= 0) continue;
     const filled = Math.ceil((p.amt / p.cap) * p.n - 1e-6);
     if (filled <= 0) continue;
-    const topRow = (p.cells[filled - 1] / COLS) | 0;
+    const topRow = (p.cells[filled - 1] / COLS) | 0, botRow = (p.cells[0] / COLS) | 0, span = Math.max(1, botRow - topRow);
+    let any = false;
     for (let k = 0; k < filled; k++) {
       const i = p.cells[k];
       if (!S.rev[i]) continue;
-      const c = i % COLS, r = (i / COLS) | 0, x = c * 4, y = UG_TOP + r * 4;
+      any = true;
+      const c = i % COLS, r = (i / COLS) | 0, X = c * S8, Y = UG_TOP * R + r * S8;
+      q(X, Y, S8, S8, CRUDE_RAMP[2 + Math.min(4, Math.floor((r - topRow) / span * 4.99))]);
       if (r === topRow) {
-        rect(x, y, 4, 4, P.crude);
-        rect(x, y, 4, 1, ((c + tick) % 5 === 0) ? P.crudeG : P.crudeL);
-      } else {
-        rect(x, y, 4, 4, ((c * 7 + r * 3) % 9 === 0) ? P.crudeD : P.crude);
-        if ((c + r * 5 + tick) % 23 === 0) rect(x + 1, y + 1, 1, 1, P.crudeL);
-      }
+        const wv = Math.sin(GT * 2.5 + c * 0.9) > 0.3 ? 1 : 0;
+        if (wv) q(X, Y, S8, 1, '#1c0c28');
+        q(X, Y + wv, S8, 1, CRUDE_RAMP[0]); q(X, Y + wv + 1, S8, 1, CRUDE_RAMP[1]);
+      } else if ((c * 13 + r * 7 + ((GT * 2) | 0)) % 37 === 0) q(X + 3, Y + 5 - (((GT * 8) | 0) % 5), 2, 2, CRUDE_RAMP[1]);
     }
+    if (any) glow(p.cx, UG_TOP + topRow * CELL + 3, Math.max(14, Math.sqrt(p.n) * 4.5), '#b04cff', 0.16 + 0.05 * Math.sin(GT * 2 + p.id));
   }
 }
 function drawPlotLines() {
   for (let k = 0; k <= NPLOTS; k++) {
     const x = PLOT_X0 + k * PLOT_W;
-    for (let y = UG_TOP; y < UG_BOT; y += 8) rect(x, y, 1, 3, 'rgba(160,130,210,0.16)');
-    rect(x, SURF - 3, 1, 4, P.gray);
+    for (let y = UG_TOP; y < UG_BOT; y += 8) rect(x, y, 0.5, 3, 'rgba(180,150,230,0.18)');
+    q(x * R - 1, (SURF - 4) * R, 3, 8, '#566c86'); q(x * R - 1, (SURF - 4) * R, 1, 8, '#94b0c2');
   }
 }
 function drawPlotFlags() {
   for (const p of S.plots) {
     if (!p.owner) continue;
     const col = p.owner === 'you' ? P.cyan : rcol(p.owner);
-    rect(p.x0 + 1, SURF, PLOT_W - 1, 1, col);
-    const fx = p.x0 + 4;
-    rect(fx, SURF - 14, 1, 14, P.lgray);
-    rect(fx + 1, SURF - 14, 6, 4, col);
-    if (((GT * 3) | 0) % 2) rect(fx + 6, SURF - 11, 1, 1, col); else rect(fx + 6, SURF - 14, 1, 1, P.black);
+    q(p.x0 * R + 2, SURF * R, PLOT_W * R - 3, 1, col);
+    const FX = (p.x0 + 4) * R, FY = (SURF - 15) * R;
+    q(FX, FY, 2, 30, '#c7d2e2'); q(FX + 1, FY, 1, 30, '#566c86');
+    for (let i = 0; i < 14; i++) {
+      const wv = Math.round(Math.sin(GT * 5 - i * 0.6) * 1.2);
+      q(FX + 2 + i, FY + 1 + wv, 1, 8, i % 4 === 0 ? shade(col, -0.25) : col);
+      q(FX + 2 + i, FY + 1 + wv, 1, 1, shade(col, 0.5));
+    }
   }
 }
 function segPt(s, t) { return [Math.round(s.x1 + s.ux * t), Math.round(s.y1 + s.uy * t)]; }
-function drawPipes() {
-  const vis = S.segs.filter(s => s.status !== 'gone' && s.status !== 'queued' && s.prog > 0);
-  for (const s of vis) for (let t = 0; t <= s.prog; t += 1) { const [x, y] = segPt(s, t); rect(x - 1, y - 1, 3, 3, P.black); }
-  for (const s of vis) {
-    const col = s.owner === 'you' ? P.lgray : rcol(s.owner);
-    for (let t = 0; t <= s.prog; t += 1) { const [x, y] = segPt(s, t); rect(x, y, 1, 1, col); }
+// finished pipe is cached on its own layer and only the newly drilled part is painted each frame
+function paintPipe(s, t0, t1) {
+  const g = S.pipeX, mine = s.owner === 'you';
+  const base = mine ? '#8b9bc0' : rcol(s.owner), hi = mine ? '#e0e8f6' : shade(base, 0.4), lo = mine ? '#3a4560' : shade(base, -0.45);
+  const pt = t => [Math.round((s.x1 + s.ux * t) * R), Math.round((s.y1 + s.uy * t - SURF) * R)];
+  if (!mine) {
+    g.globalAlpha = 0.55;
+    for (let t = t0; t <= t1; t += 0.5) { const [X, Y] = pt(t); g.fillStyle = base; g.fillRect(X - 1, Y - 1, 2, 2); }
+    g.globalAlpha = 1;
+    return;
   }
-  // flowing crude
+  for (let t = t0; t <= t1; t += 0.5) { const [X, Y] = pt(t); g.fillStyle = '#05060c'; g.fillRect(X - 2, Y - 2, 5, 5); }
+  for (let t = Math.max(0, t0 - 3); t <= t1; t += 0.5) {
+    const [X, Y] = pt(t);
+    g.fillStyle = base; g.fillRect(X - 1, Y - 1, 3, 3);
+    g.fillStyle = hi; g.fillRect(X - 1, Y - 1, 1, 1);
+    g.fillStyle = lo; g.fillRect(X + 1, Y + 1, 1, 1);
+  }
+  if (t0 === 0) { const [X, Y] = pt(0); g.fillStyle = '#05060c'; g.fillRect(X - 3, Y - 3, 7, 7); g.fillStyle = '#c7d2e2'; g.fillRect(X - 2, Y - 2, 5, 5); g.fillStyle = '#566c86'; g.fillRect(X - 1, Y - 1, 3, 3); }
+}
+function drawPipes() {
+  if (S.pipeReset) { S.pipeX.clearRect(0, 0, S.pipeC.width, S.pipeC.height); for (const s of S.segs) s.drawn = 0; S.pipeReset = false; }
+  // rival pipes first so yours always sit on top
+  for (const pass of [false, true]) for (const s of S.segs) {
+    if ((s.owner === 'you') !== pass || s.status === 'gone' || s.status === 'queued') continue;
+    const d = s.drawn || 0;
+    if (s.prog > d + 0.01) { paintPipe(s, d, s.prog); s.drawn = s.prog; }
+  }
+  ctx.drawImage(S.pipeC, 0, SURF, W, UG_BOT - SURF);
+  // flowing crude inside your pipes
   const off = (GT * 24) % 8;
   for (const r of S.rigs) {
-    if (!r.pumping) continue;
+    if (!r.pumping || r.owner !== 'you') continue;
     for (const id of r.segs) {
       const s = S.segs[id];
       if (s.status !== 'done' && s.status !== 'stop') continue;
-      for (let t = ((s.prog - off) % 8 + 8) % 8; t <= s.prog; t += 8) { const [x, y] = segPt(s, t); rect(x, y, 1, 1, r.owner === 'you' ? P.crudeL : P.orange); }
+      for (let t = ((s.prog - off) % 8 + 8) % 8; t <= s.prog; t += 8) q(Math.round((s.x1 + s.ux * t) * R) - 1, Math.round((s.y1 + s.uy * t) * R) - 1, 2, 2, '#e9a8ff');
     }
   }
   // queued plans + drill heads
   for (const s of S.segs) {
     if (s.owner !== 'you') continue;
     if (s.status === 'queued') {
-      for (let t = 0; t <= s.len; t += 4) { const [x, y] = segPt(s, t); rect(x, y, 1, 1, P.gray); }
+      for (let t = 0; t <= s.len; t += 4) { const [x, y] = segPt(s, t); q(x * R, y * R, 2, 2, P.gray); }
     } else if (s.status === 'drill') {
-      for (let t = s.prog + 4; t <= s.len; t += 4) { const [x, y] = segPt(s, t); rect(x, y, 1, 1, P.gray); }
-      const [x, y] = segPt(s, s.prog);
-      rect(x - 1, y - 1, 3, 3, blink() ? P.yellow : P.white);
+      for (let t = s.prog + 4; t <= s.len; t += 4) { const [x, y] = segPt(s, t); q(x * R, y * R, 2, 2, P.gray); }
+      const hx = s.x1 + s.ux * s.prog, hy = s.y1 + s.uy * s.prog;
+      q(Math.round(hx * R) - 3, Math.round(hy * R) - 3, 6, 6, '#05060c');
+      q(Math.round(hx * R) - 2, Math.round(hy * R) - 2, 4, 4, blink() ? '#ffcd75' : '#fff3c0');
+      glow(hx, hy, 8, '#ffcd75', 0.6);
     }
   }
 }
@@ -1697,10 +2065,12 @@ function drawScanWaves() {
   for (const sc of S.scans) {
     if (sc.done) continue;
     const k = Math.min(1, sc.t / sc.dur);
-    for (let a = 0; a <= Math.PI; a += 0.03) {
-      const x = sc.x + Math.cos(a) * sc.rx * k, y = UG_TOP + Math.sin(a) * sc.ry * k;
-      rect(x | 0, y | 0, 1, 1, P.cyan);
+    for (const [kk, col, a] of [[k, '#73eff7', 1], [k * 0.92, '#41a6f6', 0.5]]) {
+      ctx.globalAlpha = a * (1 - k * 0.5);
+      for (let ang = 0; ang <= Math.PI; ang += 0.012) q(Math.round((sc.x + Math.cos(ang) * sc.rx * kk) * R), Math.round((UG_TOP + Math.sin(ang) * sc.ry * kk) * R), 2, 2, col);
     }
+    ctx.globalAlpha = 1;
+    glow(sc.x, UG_TOP + sc.ry * k * 0.5, sc.rx * k, '#41a6f6', 0.12);
   }
 }
 function drawLinks() {
@@ -1708,12 +2078,27 @@ function drawLinks() {
   for (const r of myRigs()) {
     if (!r.silo) continue;
     const a = Math.min(r.x, r.silo.x), b = Math.max(r.x, r.silo.x);
-    rect(a, SURF - 2, b - a, 2, P.dgray); rect(a, SURF - 2, b - a, 1, P.gray);
+    q(a * R, (SURF - 2) * R, (b - a) * R, 4, '#05060c');
+    q(a * R, (SURF - 2) * R + 1, (b - a) * R, 2, '#8b9bc0');
+    q(a * R, (SURF - 2) * R + 1, (b - a) * R, 1, '#d6e0f0');
     if (r.xfer) {
       const dir = Math.sign(r.silo.x - r.x);
-      for (let t = off; t < b - a; t += 6) rect(Math.round(r.x + dir * t), SURF - 2, 1, 1, P.crudeL);
+      for (let t = off; t < b - a; t += 6) q(Math.round((r.x + dir * t) * R), (SURF - 2) * R + 1, 2, 2, '#e9a8ff');
     }
   }
+}
+function drawParticles() {
+  for (const p of S.parts) q(Math.round(p.x * R), Math.round(p.y * R), p.size * R, p.size * R, p.color);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.imageSmoothingEnabled = true;
+  for (const p of S.parts) {
+    if (!p.glow) continue;
+    ctx.globalAlpha = clamp(p.life * 1.5, 0, 0.8);
+    const r = 3 + p.size * 2;
+    ctx.drawImage(glowSprite(p.color), p.x - r, p.y - r, r * 2, r * 2);
+  }
+  ctx.restore();
 }
 function previewInfo() {
   if (S.tool || S.paused || S.help) return null;
@@ -1778,16 +2163,14 @@ function overUI() {
 }
 let selPanelRect = null;
 function drawTopBar() {
-  rect(0, 0, W, 12, P.navy); rect(0, 12, W, 1, P.dgray);
+  hudBar(0, 13);
   txt('S' + G.sector + ' ' + S.name, 4, 4, P.lgray);
   const lo = rankReq(S.rank), hi = rankReq(S.rank + 1);
   txt('RANK ' + S.rank, 104, 4, P.yellow);
-  rect(136, 4, 50, 5, P.black);
-  rect(136, 4, Math.round(50 * clamp((S.xp - lo) / (hi - lo), 0, 1)), 5, P.yellow);
+  meter(136, 3.5, 50, 6, (S.xp - lo) / (hi - lo), P.yellow);
   const day = Math.min(S.days, Math.floor(S.day) + 1);
   txt('DAY ' + day + '/' + S.days, 254, 4, P.white, 1, 'r');
-  rect(258, 4, 100, 5, P.black);
-  rect(258, 4, Math.round(100 * Math.min(1, S.day / S.days)), 5, S.days - S.day < 10 ? P.orange : P.green);
+  meter(258, 3.5, 100, 6, S.day / S.days, S.days - S.day < 10 ? P.orange : P.green);
   if (S.flare > 0) txt('FLARE', 364, 4, P.orange);
   txt(G.rd + ' RD', 470, 4, P.cyan, 1, 'r');
   txt('SHARES ' + G.shares + ':' + rivalTotal(), 548, 4, P.lgray, 1, 'r');
@@ -1840,8 +2223,8 @@ function tutorialHint() {
   if (!mine.length) return 'BUILD A RIG [1] ON YOUR PLOT ABOVE THE CRUDE';
   if (!S.segs.some(s => s.owner === 'you')) return 'CLICK YOUR RIG, THEN CLICK UNDERGROUND TO DRILL';
   if (!mine.some(r => r.pockets.size)) return 'STEER YOUR PIPE INTO A PURPLE CRUDE POCKET';
-  if (!S.haulers.length) return 'BUY A HAULER [3] TO MOVE YOUR CRUDE';
-  if (S.stats.sold === 0) return 'CLICK HAULER > CLICK RIG TO LOAD > CLICK HELIX OR NOVA TO SELL';
+  if (!S.haulers.length) return 'BUY A HAULER [3] AND PICK A SIDE - IT HAULS AND SELLS BY ITSELF';
+  if (S.stats.sold === 0) return 'YOUR HAULER RUNS ON ITS OWN - KEEP THOSE RIGS PUMPING';
   return null;
 }
 function drawHint() {
@@ -1874,7 +2257,7 @@ function toggleSfx() { Sound.sfx = !Sound.sfx; Sound.savePrefs(); sfx('click'); 
 function toggleMusic() { Sound.music = !Sound.music; Sound.init(); if (Sound.music) Sound.startMusic(); else Sound.stopMusic(); Sound.savePrefs(); }
 function toggleCrt() { crt.classList.toggle('off'); Sound.savePrefs(); sfx('click'); }
 function drawBottomBar() {
-  rect(0, 341, W, 19, P.navy); rect(0, 341, W, 1, P.dgray);
+  hudBar(341, 19);
   const by = 344, bh = 13;
   drawPortrait(CHAR().look, 3, 342, 1);
   rect(2, 341, 18, 1, abilReady() ? P.yellow : P.dgray);
@@ -1894,10 +2277,9 @@ function drawBottomBar() {
 }
 function haulerLabel(h) {
   switch (h.state) {
-    case 'idle': return h.cargo > 0 ? 'IDLE (HAS CARGO)' : 'IDLE';
+    case 'idle': return h.cargo > 0 ? 'HOLDING CARGO' : 'WAITING FOR CRUDE';
     case 'toLoad': return 'FLYING TO PICKUP';
-    case 'loading': return h.wait > 1 ? 'WAITING FOR CRUDE' : 'LOADING';
-    case 'full': return 'FULL - SEND IT TO A STATION';
+    case 'loading': return h.wait > 1 ? 'TOPPING UP' : 'LOADING';
     case 'toSell': return 'FLYING TO ' + h.target.name;
     case 'selling': return 'SELLING AT ' + h.target.name;
   }
@@ -1914,9 +2296,10 @@ function drawSelPanel() {
       let live = 0; for (const id of o.pockets) live += S.pockets[id].amt;
       const state = o.offline > 0 ? 'OFFLINE ' + o.offline + ' DAYS' : o.drilling ? 'DRILLING' : o.pumping ? 'PUMPING' : o.tank >= st.rigCap() - 0.01 ? 'TANK FULL' : 'IDLE';
       lines = ['RIG #' + o.id + ' - ' + state, 'TANK ' + fmt(o.tank) + '/' + st.rigCap() + '   CRUDE LEFT IN POCKETS ' + fmt(live) + 'U', 'CLICK UNDERGROUND TO DRILL. DRAG FROM A PIPE TO BRANCH'];
-      btns = [['STOP DRILL', () => stopDrill(o), !activeSeg(o)], ['SCRAP +$' + Math.round(COST.rig * 0.4), () => scrapRig(o), false]];
+      btns = [['STOP DRILL', () => stopDrill(o), { disabled: !activeSeg(o) }], ['SCRAP +$' + Math.round(COST.rig * 0.4), () => scrapRig(o), { color: P.red }]];
     } else if (S.sel.kind === 'hauler') {
-      lines = ['HAULER - ' + haulerLabel(o), 'CARGO ' + fmt(o.cargo) + '/' + st.hCap() + (has('auto') && o.home ? '   AUTOPILOT ROUTE SET' : ''), 'CLICK A RIG OR SILO TO LOAD, A STATION TO SELL'];
+      lines = ['HAULER - ' + haulerLabel(o), 'CARGO ' + fmt(o.cargo) + '/' + st.hCap() + '   SELLS AT ' + S.stations[o.side].name + (has('auto') ? ' (SMART)' : ''), 'FULLY AUTOMATIC. PICK ITS SIDE ON THE RIGHT'];
+      btns = [['< HELIX', () => setSide(o, 0), { active: o.side === 0 }], ['NOVA >', () => setSide(o, 1), { active: o.side === 1 }]];
     } else if (S.sel.kind === 'silo') {
       lines = ['SILO - ' + fmt(o.tank) + '/' + st.siloCap(), 'RIGS WITHIN 16M PIPE THEIR CRUDE IN HERE', 'SEND HAULERS HERE TO LOAD'];
     }
@@ -1926,7 +2309,7 @@ function drawSelPanel() {
   selPanelRect = [x, y, w, h];
   panel(x, y, w, h, P.navy, P.gray);
   lines.forEach((l, i) => txt(l, x + 4, y + 3 + i * 8, i === 0 ? P.white : P.lgray));
-  btns.forEach(([label, fn, dis], i) => button(x + w - 58, y + 2 + i * 12, 55, 11, label, fn, { disabled: dis, color: i ? P.red : P.dblue }));
+  btns.forEach(([label, fn, opt], i) => button(x + w - 58, y + 2 + i * 12, 55, 11, label, fn, opt));
 }
 function drawTooltip() {
   if (S.tool || S.drag || overUI()) return;
@@ -1965,6 +2348,15 @@ function wrap(str, n) {
   }
   if (line) out.push(line);
   return out;
+}
+function drawHaulerPicker() {
+  const x = 140, y = 300, w = 168, h = 40;
+  panel(x, y, w, h, P.navy, P.cyan);
+  txt('NEW HAULER $' + COST.hauler + ' - SELL WHERE?', x + w / 2, y + 5, P.white, 1, 'c');
+  S.stations.forEach((s2, i) => {
+    button(x + 6 + i * 80, y + 15, 76, 14, (i ? '' : '< ') + s2.name + ' $' + price(s2).toFixed(1) + (i ? ' >' : ''), () => buyHaulerSide(i), { color: P.dblue, hc: P.blue, tc: s2.closed > 0 ? P.red : P.yellow });
+  });
+  txt('ARROW KEYS OR CLICK', x + w / 2, y + 32, P.gray, 1, 'c');
 }
 function drawPerkChips() {
   let x = 4;
@@ -2020,14 +2412,24 @@ function drawHelpPanel(onClose) {
   HELP.forEach((l, i) => txt(l, x + 12, y + 24 + i * 8, l.startsWith('KEYS') ? P.cyan : P.white));
   button(W / 2 - 40, y + h - 18, 80, 13, 'CLOSE', onClose);
 }
+function drawShootingStar() {
+  if (!S.shoot && Math.random() < 0.003) S.shoot = { x: 60 + Math.random() * 500, y: 8 + Math.random() * 30, vx: 140 + Math.random() * 80, vy: 40 + Math.random() * 30, life: 0.6 };
+  const st2 = S.shoot;
+  if (!st2) return;
+  st2.life -= 1 / 60; st2.x += st2.vx / 60; st2.y += st2.vy / 60;
+  for (let k = 0; k < 14; k++) { ctx.globalAlpha = (1 - k / 14) * clamp(st2.life * 3, 0, 1); q(Math.round((st2.x - st2.vx * k * 0.004) * R), Math.round((st2.y - st2.vy * k * 0.004) * R), 2, 1, '#f3f6ff'); }
+  ctx.globalAlpha = 1;
+  if (st2.life <= 0 || st2.y > SURF - 10) S.shoot = null;
+}
 function renderPlay() {
   ctx.save();
   if (S.shake > 0) ctx.translate(Math.round((Math.random() - 0.5) * S.shake), Math.round((Math.random() - 0.5) * S.shake));
-  ctx.drawImage(S.skyC, 0, 0);
-  for (const s of S.twinkles) if (((GT * s.f + s.p) % 1) < 0.5) rect(s.x, s.y, 1, 1, P.white);
-  ctx.drawImage(S.dirtC, 0, UG_TOP);
+  ctx.drawImage(S.skyC, 0, 0, W, UG_TOP);
+  for (const s of S.twinkles) { const a = Math.sin(GT * s.f * 4 + s.p * 6.28); if (a > 0.4) { q(s.x * R, s.y * R, 1, 1, P.white); if (a > 0.9) glow(s.x, s.y, 2.5, '#c8ecff', 0.6); } }
+  drawShootingStar();
+  ctx.drawImage(S.dirtC, 0, UG_TOP, W, ROWS * CELL);
   drawOil();
-  ctx.drawImage(S.fogC, 0, UG_TOP);
+  drawFog();
   drawPlotLines();
   drawScanWaves();
   drawPipes();
@@ -2041,7 +2443,7 @@ function renderPlay() {
   drawSelection();
   for (const h of S.haulers) drawHauler(h);
   drawGhost();
-  for (const p of S.parts) rect(p.x | 0, p.y | 0, p.size, p.size, p.color);
+  drawParticles();
   for (const f of S.floats) { ctx.globalAlpha = Math.min(1, f.life); txtS(f.text, f.x, f.y | 0, f.color, 1, 'c'); }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -2056,6 +2458,7 @@ function renderPlay() {
   drawTooltip();
   drawTaunt();
   if (S.abil.on > 0) txtS(CHAR().active.name + ' ACTIVE - ' + S.abil.on + ' DAYS', 320, 304, blink() ? P.yellow : P.orange, 1, 'c');
+  if (S.hpick) drawHaulerPicker();
   if (S.bm) drawBlackMarket();
   if (S.choice) drawCards();
   if (S.paused) drawPauseMenu();
@@ -2064,31 +2467,62 @@ function renderPlay() {
 
 // ---------------------------------------------------------------- other screens
 const TS = { stars: Array.from({ length: 140 }, () => ({ x: Math.random() * W, y: Math.random() * H, z: 0.15 + Math.random() * 0.85 })), hx: -20, help: false };
+let NEBULA = null;
 function starfield(speed = 1) {
-  rect(0, 0, W, H, '#05050f');
+  if (!NEBULA) {
+    NEBULA = mk(W * R, H * R);
+    const g = NEBULA.getContext('2d'), rng = mulberry32(1234);
+    const bg = g.createLinearGradient(0, 0, 0, H * R);
+    bg.addColorStop(0, '#04030c'); bg.addColorStop(0.6, '#0a0820'); bg.addColorStop(1, '#160d2c');
+    g.fillStyle = bg; g.fillRect(0, 0, W * R, H * R);
+    paintNebula(g, W * R, H * R, rng, 12);
+    paintStars(g, W * R, H * R, rng, 320);
+  }
+  ctx.drawImage(NEBULA, 0, 0, W, H);
   for (const s of TS.stars) {
     s.x -= s.z * 0.4 * speed; if (s.x < 0) { s.x += W; s.y = Math.random() * H; }
-    rect(s.x | 0, s.y | 0, 1, 1, s.z > 0.75 ? P.white : s.z > 0.45 ? P.lgray : P.gray);
+    const sz = s.z > 0.75 ? 2 : 1;
+    q(Math.round(s.x * R), Math.round(s.y * R), sz, sz, s.z > 0.75 ? P.white : s.z > 0.45 ? P.lgray : P.gray);
+    if (s.z > 0.93) glow(s.x, s.y, 3, '#c8ecff', 0.5);
   }
 }
+const titleCache = {};
 function bigTitle(text, y, scale) {
-  const w = tw(text, scale), x = (W - w) / 2;
-  txt(text, x + scale, y + scale, P.plum, scale);
-  txt(text, x, y, P.crude, scale);
-  ctx.save(); ctx.beginPath(); ctx.rect(0, y, W, scale * 2); ctx.clip();
-  txt(text, x, y, P.crudeG, scale);
-  ctx.restore();
-  ctx.save(); ctx.beginPath(); ctx.rect(0, y + scale * 2, W, scale); ctx.clip();
-  txt(text, x, y, P.crudeL, scale);
-  ctx.restore();
+  const w = tw(text, scale), x = (W - w) / 2, key = text + scale;
+  let c = titleCache[key];
+  if (!c) {
+    const pad = scale, ow = scale * 0.5;
+    c = mk((w + pad * 2) * R, (5 * scale + pad * 2) * R);
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.scale(R, R);
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]]) drawText(g, text, pad + dx * ow, pad + dy * ow, '#12061c', scale);
+    drawText(g, text, pad + ow, pad + ow * 2, '#2a0a3e', scale);
+    const t = mk(c.width, c.height), tg = t.getContext('2d');
+    tg.imageSmoothingEnabled = false; tg.scale(R, R);
+    drawText(tg, text, pad, pad, '#ffffff', scale);
+    tg.setTransform(1, 0, 0, 1, 0, 0);
+    tg.globalCompositeOperation = 'source-in';
+    const top = pad * R, hgt = 5 * scale * R, band = ['#ffffff', '#f8d8ff', '#e7a2ff', '#c868ff', '#a63ef0', '#7f24c8', '#5a1a85'];
+    const grad = tg.createLinearGradient(0, top, 0, top + hgt); // hard colour steps for a banded 16-bit logo
+    band.forEach((col, i) => { grad.addColorStop(i / band.length, col); grad.addColorStop((i + 1) / band.length - 0.0001, col); });
+    tg.fillStyle = grad; tg.fillRect(0, 0, t.width, t.height);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(t, 0, 0);
+    c.pad = pad;
+    titleCache[key] = c;
+  }
+  glow(W / 2, y + scale * 2.5, w * 0.55, '#9b30d9', 0.35 + 0.08 * Math.sin(GT * 2));
+  ctx.drawImage(c, x - c.pad, y - c.pad, c.width / R, c.height / R);
 }
 function renderTitle() {
   starfield();
-  if (!PLANET) PLANET = makePlanet(26);
-  ctx.drawImage(PLANET, 470, 40);
+  drawPlanet(470, 40);
   // ground scene
-  rect(0, 300, W, 60, '#2c2026');
-  for (let x = 0; x < W; x++) { rect(x, 300, 1, 1, '#8a6352'); rect(x, 301, 1, 2, '#5b4038'); }
+  const gnd = ctx.createLinearGradient(0, 300, 0, H);
+  gnd.addColorStop(0, '#5b4038'); gnd.addColorStop(0.15, '#3a2a30'); gnd.addColorStop(1, '#140c18');
+  ctx.fillStyle = gnd; ctx.fillRect(0, 300, W, 60);
+  q(0, 600, W * R, 1, '#c09a82'); q(0, 601, W * R, 2, '#8a6352');
   for (let k = 0; k < 5; k++) drawRig({ x: 80 + k * 120, owner: k === 3 ? 'syn' : k === 1 ? 'hex' : 'deco', id: k, offline: 0, pumping: true, tank: 0 }, 300);
   for (let k = 0; k < 7; k++) {
     const x = 60 + k * 85, y = 320 + (k % 3) * 9, w = 14 + (k % 4) * 5;
@@ -2481,10 +2915,6 @@ function pipeGrab(x, y) {
 function playDown(p) {
   if (S.paused || S.help || S.choice || S.bm || S.tool) return;
   S.drag = null;
-  if (!(S.sel && S.sel.kind === 'hauler')) {
-    const h = haulerAt(p.x, p.y);
-    if (h) { S.drag = { kind: 'hauler', h }; return; }
-  }
   const r = rigAt(p.x, p.y);
   if (r && r.owner === 'you') { S.drag = { kind: 'pipe', rig: r, start: nearestPoint(r, r.x, SURF + 1) }; return; }
   if (p.y > UG_TOP) { const g = pipeGrab(p.x, p.y); if (g) S.drag = { kind: 'pipe', rig: g.rig, start: g.start }; }
@@ -2496,23 +2926,16 @@ function playUp(p) {
   const d = S.drag; S.drag = null;
   if (d && mouse.moved) {
     if (d.kind === 'pipe' && p.y > UG_TOP) { orderDrill(d.rig, d.start, p.x, p.y); S.sel = { kind: 'rig', ref: d.rig }; return; }
-    if (d.kind === 'hauler') { S.sel = { kind: 'hauler', ref: d.h }; clickWorld(p); return; }
   }
   clickWorld(p);
 }
 function clickWorld(p) {
   if (S.sel && S.sel.kind === 'hauler') {
-    const h = S.sel.ref;
-    const r = rigAt(p.x, p.y), si = siloAt(p.x, p.y), stn = stationAt(p.x, p.y);
-    if (r) { if (r.owner !== 'you') { msg("THAT'S A " + RIVALS[r.owner].short + ' RIG', P.red); sfx('err'); } else { cmdLoad(h, r); S.sel = null; } return; }
-    if (si) { cmdLoad(h, si); S.sel = null; return; }
-    if (stn) { cmdSell(h, stn); S.sel = null; return; }
+    const stn = stationAt(p.x, p.y);
+    if (stn) { setSide(S.sel.ref, S.stations.indexOf(stn)); return; }
   }
   const h = haulerAt(p.x, p.y);
   if (h) { S.sel = { kind: 'hauler', ref: h }; sfx('click'); return; }
-  if (S.sel && S.sel.kind === 'hauler' && p.y < SURF - 4 && p.y > 13) {
-    const hh = S.sel.ref; hh.state = 'idle'; hh.target = null; hh.idleX = p.x; hh.idleY = Math.max(20, p.y); return;
-  }
   const r = rigAt(p.x, p.y);
   if (r) { if (r.owner === 'you') { S.sel = { kind: 'rig', ref: r }; sfx('click'); } return; }
   const si = siloAt(p.x, p.y);
@@ -2533,6 +2956,7 @@ cv.addEventListener('pointermove', e => {
 cv.addEventListener('pointerleave', () => { mouse.x = -99; mouse.y = -99; });
 cv.addEventListener('pointerdown', e => {
   Sound.init();
+  const wasPick = S && S.hpick;
   const p = toLogical(e); mouse.x = p.x; mouse.y = p.y;
   if (e.button === 2) { if (screen === 'play' && S) { S.tool = null; S.sel = null; S.drag = null; } return; }
   try { cv.setPointerCapture(e.pointerId); } catch (_) { }
@@ -2541,6 +2965,7 @@ cv.addEventListener('pointerdown', e => {
     const b = BTN[i];
     if (inRect(p, b.x, b.y, b.w, b.h)) { mouse.consumed = true; if (b.fn) b.fn(); return; }
   }
+  if (wasPick) { S.hpick = false; mouse.consumed = true; return; }
   if (screen === 'play' && S) playDown(p);
 });
 cv.addEventListener('pointerup', e => {
@@ -2555,6 +2980,11 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (S.choice) { const i = '123'.indexOf(k); if (i >= 0 && S.choice[i]) pickPerk(i); return; }
   if (S.bm && k !== 'escape' && k !== '6') return;
+  if (S.hpick) {
+    if (k === 'arrowleft' || k === 'a') { buyHaulerSide(0); e.preventDefault(); return; }
+    if (k === 'arrowright' || k === 'd') { buyHaulerSide(1); e.preventDefault(); return; }
+    if (k === 'escape') { S.hpick = false; return; }
+  }
   if (k === ' ' || k === 'p') { togglePause(); e.preventDefault(); return; }
   if (k === 'escape') { if (S.bm) S.bm = false; else if (S.help) S.help = false; else if (S.tool || S.sel) { S.tool = null; S.sel = null; } else togglePause(); return; }
   if (S.paused) return;
@@ -2592,6 +3022,9 @@ function frame(now) {
   }
   if (S) S.shake = Math.max(0, S.shake - dt * 20);
   BTN = [];
+  ctx.setTransform(R, 0, 0, R, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   if (screen === 'title') renderTitle();
   else if (screen === 'play' && S) renderPlay();
   else if (screen === 'summary') renderSummary();

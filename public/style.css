@@ -11,7 +11,7 @@ canvas {
 }
 #crt {
   position: absolute; left: 0; top: 0; pointer-events: none;
-  background-image: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,.22) 50%);
+  background-image: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,.14) 50%);
   box-shadow: inset 0 0 140px rgba(0,0,0,.75);
 }
 #crt.off { display: none; }

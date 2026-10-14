@@ -1,6 +1,6 @@
 # VOIDCRUDE
 
-A retro pixel-art space tycoon inspired by *Turmoil*. Buy asteroid plots, scan for glowing **voidcrude**, steer drill pipes around rock and gas pockets, pump the crude into rigs, then fly haulers to the HELIX and NOVA refineries while prices change. The rival Syndicate is buying land and draining the same pockets. Spend profits between sectors on upgrades and Consortium shares. Own 51 shares to win.
+A retro pixel-art space tycoon inspired by *Turmoil*. Buy asteroid plots, scan for glowing **voidcrude**, steer drill pipes around rock and gas pockets, pump the crude into rigs, and let automatic haulers ferry it to the HELIX or NOVA refinery while prices change. The rival Syndicate is buying land and draining the same pockets. Spend profits between sectors on upgrades and Consortium shares. Own 51 shares to win.
 
 ## Progression
 
@@ -74,14 +74,13 @@ docker run -d --name voidcrude -p 8088:80 voidcrude:latest
 |---|---|
 | Click a `BUY $` sign | Buy a plot |
 | `1` / `2` / `4` | Rig / Silo / Scanner placement tool |
-| `3` | Buy a hauler |
+| `3`, then click a side (or ←/→) | Buy a hauler that sells at HELIX (left) or NOVA (right) |
 | `5` | Rock blaster (click underground) |
 | `6` | Black market |
 | `Q` | Your tycoon's ability |
 | `1`-`3` on a rank-up | Pick a perk card |
 | Click rig, then underground | Drill a pipe (drag from any pipe to branch) |
-| Click hauler, then rig/silo | Load |
-| Click hauler, then station | Sell |
+| Click a hauler, then a station | Switch which side it sells at |
 | `Space` | Pause menu |
 | `F` | Game speed x1 / x2 / x4 |
 | `Tab` | Cycle haulers |
