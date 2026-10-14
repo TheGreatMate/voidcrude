@@ -4,6 +4,9 @@ A retro pixel-art space tycoon inspired by *Turmoil*. Buy asteroid plots, scan f
 
 ## Progression
 
+- **Land auctions:** every plot is won by bidding against the rivals. Each sector opens with an auction round, any free plot can be put up for auction, and rival land grabs go to auction too. Every bid resets the clock: going once, going twice, sold.
+- **Glitch:** a $40 burrowing alien. Drop it underground and it scampers around, revealing a tunnel and sniffing out whole gas pockets.
+
 - **Tycoons:** pick 1 of 6 characters, each with a passive bonus and an active ability on `Q` (with a cooldown). Three start unlocked; the other three unlock with Legacy points.
 - **Rival corporations:** The Syndicate (grabs land), Kroll Mining (dumps crude to crash prices) and Hex Corp (sabotages your rigs). Each owns its own shares and taunts you. Any rival reaching 51 shares ends the run.
 - **Black market (`6`):** pay credits to sabotage a rival, bribe the land registry, plant a price rumor, short a rival's stock, buy **Pipe Couplers** (drill one of your rigs' pipes into another's and they share every pocket in the network), or take a quick loan.
@@ -76,7 +79,8 @@ docker run -d --name voidcrude -p 8088:80 voidcrude:latest
 
 | Input | Action |
 |---|---|
-| Click a `BUY $` sign | Buy a plot |
+| Click an `AUCTION` sign | Put a plot up for auction (`B` bids, `Esc` passes) |
+| `7`, then click underground | Release Glitch, an alien that tunnels around and sniffs out gas |
 | `1` / `2` / `4` | Rig / Silo / Scanner placement tool |
 | `3` | Buy a hauler (it joins the side with fewer haulers) |
 | `5` | Rock blaster (click underground) |

@@ -12,7 +12,7 @@ const PLOT_X0 = 56, PLOT_W = 88, NPLOTS = 6;
 const CRUISE = 52;
 const T_DIRT = 0, T_OIL = 1, T_GAS = 2, T_ROCK = 3, T_EMPTY = 4;
 const UNITS_PER_CELL = 5;
-const COST = { rig: 400, silo: 300, hauler: 250, scan: 60 };
+const COST = { rig: 400, silo: 300, hauler: 250, scan: 60, glitch: 40 };
 const SAVE_KEY = 'voidcrude_save_v1';
 const PREF_KEY = 'voidcrude_prefs_v1';
 const META_KEY = 'voidcrude_legacy_v1';
@@ -193,8 +193,8 @@ const BLACK_MARKET = [
 const HELP = [
   'THE BELT IS RICH WITH VOIDCRUDE. DRILL IT, HAUL IT, SELL IT.',
   '',
-  '1. BUY A PLOT - CLICK A "BUY" SIGN ON THE SURFACE.',
-  '2. SCAN [4] - REVEALS CRUDE, ROCK AND GAS BELOW THE SCANNER.',
+  '1. WIN PLOTS AT AUCTION - CLICK AN "AUCTION" SIGN. [B] BIDS.',
+  '2. SCAN [4] FOR CRUDE. RELEASE A GLITCH [7] TO SNIFF OUT GAS.',
   '3. BUILD A RIG [1] ON YOUR PLOT.',
   '4. CLICK THE RIG, THEN CLICK UNDERGROUND - EACH CLICK ADDS A JOINT.',
   '   DRAG FROM ANY JOINT TO BRANCH. RIGHT-CLICK ENDS. PIPE COSTS $/METER.',
@@ -893,6 +893,7 @@ function genSector(opt) {
     grid: new Uint8Array(N), pid: new Int16Array(N).fill(-1), rev: new Uint8Array(N),
     pockets: [], gases: [], plots: [], rigs: [], silos: [], haulers: [], scans: [], segs: [],
     parts: [], floats: [], msgs: [], sel: null, tool: null, drag: null, nid: 1,
+    auction: null, auctionQueue: [], critters: [],
     stats: { revenue: 0, spent: 0, sold: 0, gas: 0, rd: 0, jobs: 0 }, pcell: new Int32Array(COLS * ROWS), joints: [],
     perks: {}, xp: 0, rank: 0, pending: 0, choice: null, rdAcc: 0, blasts: 0, blasted: 0,
     mods, rivals: opt.rivals, rdMul: opt.rdMul, rdFrac: 0, rv: {}, taunt: null, bm: false, bmUses: {}, bribe: 0,
@@ -967,6 +968,8 @@ function genSector(opt) {
   S.sel = null;
   for (let k = 0; k < 24; k++) S.twinkles.push({ x: (Math.random() * W) | 0, y: 14 + ((Math.random() * 60) | 0), f: 0.3 + Math.random(), p: Math.random() });
   msg('SECTOR ' + G.sector + ': ' + S.name + ' - ' + S.days + ' DAYS ON THE CLOCK', P.cyan);
+  const lots = S.plots.filter(p => !p.owner).sort(() => Math.random() - 0.5).slice(0, G.sector === 1 ? 2 : 3).sort((a, b) => a.i - b.i);
+  for (const p of lots) startAuction(p, null);
   if (G.sector > 1 || opt.rivals.length) taunt(opt.rivals[0]);
 }
 
@@ -1447,13 +1450,6 @@ function placeAt(kind, x) {
     if (!S.keepTool) S.tool = null;
   }
 }
-function buyPlot(p) {
-  if (p.owner) return;
-  if (!afford(plotCost(p))) return;
-  spend(plotCost(p)); p.owner = 'you';
-  msg('PLOT ' + (p.i + 1) + ' ACQUIRED', P.lime); sfx('buy');
-  gainXP(10); checkBaron();
-}
 function buyHauler() {
   if (!afford(COST.hauler)) return;
   spend(COST.hauler);
@@ -1710,10 +1706,8 @@ function rivalDaily(d) {
       if (free.length && S.bribe <= 0 && mine < (id === 'syn' ? 3 : 2) && allRival < 3) {
         free.sort((a, b) => b.oil - a.oil);
         const p = Math.random() < 0.6 ? free[0] : pick(free);
-        p.owner = id;
-        msg(info.name + ' BOUGHT PLOT ' + (p.i + 1), info.col); sfx('alert');
-        if (Math.random() < 0.6) taunt(id);
-        R.queue.push({ day: d + 2 + Math.random() * 3, plot: p.i });
+        msg(info.name + ' WANTS PLOT ' + (p.i + 1) + ' - AUCTION!', info.col);
+        startAuction(p, id);
       }
       const gap = id === 'syn' ? 12 : 22;
       R.nextBuy = d + (G.sector === 1 ? gap + 8 : gap) + Math.random() * 10;
@@ -1856,6 +1850,197 @@ function endSector() {
   sfx('fanfare');
 }
 
+// ---------------------------------------------------------------- land auctions (Turmoil-style)
+// Plots are won by bidding. Each bid resets the clock; rivals bid up to a hidden ceiling based on how rich the plot is.
+function plotRank(p) { return [...S.plots].sort((a, b) => b.oil - a.oil).indexOf(p); }
+function rivalCanBid(id) {
+  const owned = S.plots.filter(p => p.owner === id).length, allRival = S.plots.filter(p => isRival(p.owner)).length;
+  return S.bribe <= 0 && owned < (id === 'syn' ? 3 : 2) && allRival < 3;
+}
+function startAuction(plot, opener) {
+  if (plot.owner) return;
+  if (S.auction) { if (!S.auctionQueue.some(q => q.plot === plot)) S.auctionQueue.push({ plot, opener }); return; }
+  const list = plotCost(plot), rich = 1 - plotRank(plot) / (NPLOTS - 1);
+  const a = { plot, start: Math.max(50, Math.round(list * 0.6 / 10) * 10), inc: Math.max(20, Math.round(list * 0.08 / 10) * 10),
+    bid: 0, leader: null, timer: 6, max: {}, next: {}, out: { you: false }, log: [], done: 0 };
+  for (const id of S.rivals) {
+    if (!rivalCanBid(id)) { a.out[id] = true; continue; }
+    const greed = id === 'syn' ? 1.15 + Math.random() * 0.55 : 0.85 + Math.random() * 0.5;
+    a.max[id] = Math.round(list * greed * (0.75 + rich * 0.5) / 10) * 10;
+    a.next[id] = 0.8 + Math.random() * 1.2;
+  }
+  S.auction = a;
+  S.tool = null; S.drag = null; S.pen = null;
+  if (opener === 'you') auctionBid('you');
+  else if (opener) { auctionBid(opener); taunt(opener, pick(['THIS PLOT IS SPOKEN FOR.', 'BID AGAINST ME? CUTE.', 'GOING, GOING... MINE.'])); }
+  sfx('alert');
+}
+function nextBid(a) { return a.leader ? a.bid + a.inc : a.start; }
+function auctionBid(who) {
+  const a = S.auction;
+  if (!a || a.done) return;
+  const amt = nextBid(a);
+  if (who === 'you') {
+    if (a.leader === 'you') return;
+    if (G.credits < amt) { msg('NOT ENOUGH CREDITS TO BID $' + fmt(amt), P.red); sfx('err'); return; }
+    a.out.you = false;
+  }
+  a.bid = amt; a.leader = who;
+  a.timer = Math.max(a.timer, 3.2);
+  a.log.unshift({ who, amt });
+  if (a.log.length > 4) a.log.pop();
+  sfx(who === 'you' ? 'buy' : 'click');
+}
+function auctionPass() {
+  const a = S.auction;
+  if (!a || a.done) return;
+  a.out.you = true;
+  a.timer = Math.min(a.timer, 1.5);
+  sfx('click');
+}
+function updateAuction(dt) {
+  const a = S.auction;
+  if (a.done) {
+    a.done -= dt;
+    if (a.done <= 0) { S.auction = null; const q = S.auctionQueue.shift(); if (q) startAuction(q.plot, q.opener); }
+    return;
+  }
+  for (const id of Object.keys(a.max)) {
+    if (a.out[id] || a.leader === id) continue;
+    a.next[id] -= dt;
+    if (a.next[id] > 0) continue;
+    if (nextBid(a) <= a.max[id]) { auctionBid(id); for (const o of Object.keys(a.next)) a.next[o] = 0.6 + Math.random() * 1.4; }
+    else a.out[id] = true;
+  }
+  const rivalsLeft = Object.keys(a.max).some(id => !a.out[id] && a.leader !== id);
+  if (!rivalsLeft && (a.out.you || a.leader === 'you')) a.timer = Math.min(a.timer, 1.6);
+  a.timer -= dt;
+  if (a.timer > 0) return;
+  // hammer falls
+  const p = a.plot;
+  a.done = 1.4;
+  if (!a.leader) { msg('NO BIDS - PLOT ' + (p.i + 1) + ' STAYS ON THE MARKET', P.lgray); return; }
+  if (a.leader === 'you') {
+    if (G.credits < a.bid) { msg('YOU COULD NOT PAY - THE SALE IS VOID', P.red); return; }
+    spend(a.bid); p.owner = 'you';
+    msg('SOLD! PLOT ' + (p.i + 1) + ' IS YOURS FOR $' + fmt(a.bid), P.lime);
+    sfx('fanfare'); gainXP(10); checkBaron();
+  } else {
+    p.owner = a.leader;
+    msg('SOLD TO ' + RIVALS[a.leader].name + ' FOR $' + fmt(a.bid), rcol(a.leader));
+    sfx('thud');
+    S.rv[a.leader].queue.push({ day: S.lastDay + 2 + Math.random() * 3, plot: p.i });
+  }
+}
+function drawAuction() {
+  const a = S.auction, p = a.plot;
+  // dim everything except the plot on the block
+  const shade2 = 'rgba(5,5,15,0.62)';
+  rect(0, 0, p.x0, H, shade2); rect(p.x1, 0, W - p.x1, H, shade2);
+  rect(p.x0, 0, PLOT_W, SURF - 40, shade2); rect(p.x0, UG_BOT, PLOT_W, H - UG_BOT, shade2);
+  brackets(p.x0, SURF - 40, PLOT_W, UG_BOT - SURF + 40, blink() ? P.yellow : P.orange);
+  const w = 260, h = 150, x = p.x0 + PLOT_W / 2 < 320 ? 360 : 20, y = 112;
+  panel(x, y, w, h, '#1b2350', P.yellow);
+  txtS('LAND AUCTION', x + w / 2, y + 7, P.yellow, 2, 'c');
+  const rank = plotRank(p), surveyed = has('survey');
+  txt('PLOT ' + (p.i + 1) + (surveyed ? '  -  ' + (rank < 2 ? 'RICH' : rank < 4 ? 'FAIR' : 'POOR') + ' GROUND' : '  -  UNSURVEYED'), x + w / 2, y + 25, surveyed ? (rank < 2 ? P.lime : rank < 4 ? P.yellow : P.red) : P.lgray, 1, 'c');
+  // current bid + leader
+  if (a.leader) {
+    const look = a.leader === 'you' ? CHAR().look : RIVALS[a.leader].look;
+    drawPortrait(look, x + 12, y + 36, 2);
+    txt(a.leader === 'you' ? 'YOU LEAD' : RIVALS[a.leader].name + ' LEADS', x + 50, y + 38, a.leader === 'you' ? P.cyan : rcol(a.leader));
+    txtS('$' + fmt(a.bid), x + 50, y + 48, P.yellow, 2);
+  } else {
+    txt('OPENING BID', x + 50, y + 38, P.lgray);
+    txtS('$' + fmt(a.start), x + 50, y + 48, P.white, 2);
+  }
+  // going once / twice / sold
+  const call = a.done ? 'SOLD!' : a.timer < 1 ? 'GOING TWICE...' : a.timer < 2 ? 'GOING ONCE...' : '';
+  if (call) txtS(call, x + w - 12, y + 52, a.done ? P.lime : P.orange, 1, 'r');
+  meter(x + 12, y + 74, w - 24, 6, a.done ? 0 : a.timer / 6, a.timer < 2 ? P.orange : P.lime);
+  // bidders
+  let bx = x + 12;
+  for (const id of Object.keys(a.out).filter(k => k !== 'you')) {
+    const label = RIVALS[id].short + (a.out[id] ? ' OUT' : a.leader === id ? ' LEAD' : ' IN');
+    txt(label, bx, y + 86, a.out[id] ? P.gray : rcol(id)); bx += tw(label) + 12;
+  }
+  a.log.slice(0, 3).forEach((l, i) => txt((l.who === 'you' ? 'YOU' : RIVALS[l.who].short) + ' BID $' + fmt(l.amt), x + w - 12, y + 86 + i * 8, i ? P.gray : P.lgray, 1, 'r'));
+  if (!a.done) {
+    const amt = nextBid(a), can = a.leader !== 'you' && G.credits >= amt;
+    button(x + 12, y + h - 26, 140, 16, a.leader === 'you' ? 'YOU LEAD' : 'BID $' + fmt(amt) + ' [B]', () => auctionBid('you'), { disabled: !can, color: P.green, hc: P.lime, tc: P.navy });
+    button(x + 160, y + h - 26, w - 172, 16, a.out.you ? 'PASSED' : 'PASS [ESC]', auctionPass, { disabled: a.out.you, color: P.dgray });
+  }
+  txt('YOU HAVE $' + fmt(G.credits), x + w / 2, y + h - 7, P.lgray, 1, 'c');
+}
+
+// ---------------------------------------------------------------- Glitch: burrowing alien that sniffs out gas
+function releaseGlitch(x, y) {
+  if (y < UG_TOP + 6 || y > UG_BOT - 4) { msg('DROP GLITCH UNDERGROUND', P.red); sfx('err'); return; }
+  if (!afford(COST.glitch)) return;
+  spend(COST.glitch);
+  S.critters.push({ x, y, dir: Math.random() < 0.5 ? -1 : 1, vy: 0, t: 0, life: 16, sniffed: new Set() });
+  for (let k = 0; k < 14; k++) part(x, y, (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 40, 0.5, pick(['#73eff7', '#41a6f6', '#f4f4f4']), 0, 1, true);
+  sfx('scan');
+  S.tool = null;
+}
+function updateCritters(dt) {
+  for (const c of S.critters) {
+    c.t += dt;
+    c.x += c.dir * 16 * dt;
+    c.vy = clamp(c.vy + (Math.random() - 0.5) * 60 * dt, -10, 10);
+    c.y += c.vy * dt;
+    if (c.y < UG_TOP + 6) { c.y = UG_TOP + 6; c.vy = Math.abs(c.vy); }
+    if (c.y > UG_BOT - 6) { c.y = UG_BOT - 6; c.vy = -Math.abs(c.vy); }
+    if (c.x < 6 || c.x > W - 6) c.dir *= -1;
+    if (Math.random() < 0.004) c.dir *= -1;
+    revealAround(c.x, c.y, 2);
+    if (Math.random() < 0.3) part(c.x - c.dir * 3, c.y + 2, -c.dir * 15, -Math.random() * 15, 0.4, pick(['#8a6352', '#b07a5c', '#5b4038']), 40);
+    for (const g of S.gases) {
+      if (!g.live || c.sniffed.has(g.id)) continue;
+      const i = g.cells[0], gx = (i % COLS) * CELL + 2, gy = UG_TOP + ((i / COLS) | 0) * CELL + 2;
+      if (Math.hypot(gx - c.x, gy - c.y) > 34) continue;
+      c.sniffed.add(g.id);
+      for (const ci of g.cells) reveal(ci % COLS, (ci / COLS) | 0);
+      msg('GLITCH SNIFFED OUT A GAS POCKET! DRILL AROUND IT', P.cyan);
+      float(c.x, c.y - 8, 'SNIFF!', P.cyan);
+      if (Sound.sfx) { Sound.tone(1400, 0.08, 'square', 0.06); Sound.tone(1900, 0.1, 'square', 0.06, 0.08); }
+    }
+  }
+  for (const c of S.critters) if (c.t >= c.life) {
+    for (let k = 0; k < 16; k++) part(c.x, c.y, (Math.random() - 0.5) * 50, (Math.random() - 0.5) * 50, 0.6, pick(['#73eff7', '#41a6f6', '#f4f4f4']), 0, 1, true);
+    if (Sound.sfx) Sound.tone(900, 0.2, 'sine', 0.06, 0, 1800);
+  }
+  S.critters = S.critters.filter(c => c.t < c.life);
+}
+// a little blue alien with big ears, drawn in 2x pixels; d = facing
+function drawGlitch(gx, gy, d, t) {
+  const X = Math.round(gx * R), Y = Math.round(gy * R) + (Math.sin(t * 18) > 0 ? 0 : 1);
+  const gq = (dx, dy, w, h, c) => q(d > 0 ? X + dx : X - dx - w + 1, Y + dy, w, h, c);
+  const B = '#3b7dd8', BL = '#6aaef0', BD = '#24508f', E = '#0b0b14', IN = '#e39ad2';
+  // ears (big and floppy)
+  const flap = Math.sin(t * 10) > 0 ? 1 : 0;
+  gq(-13, -11 + flap, 3, 2, B); gq(-12, -9 + flap, 6, 2, B); gq(-9, -7 + flap, 5, 2, B); gq(-11, -9 + flap, 4, 1, IN); gq(-8, -7 + flap, 3, 1, IN);
+  gq(11, -11 - flap, 3, 2, B); gq(7, -9 - flap, 6, 2, B); gq(5, -7 - flap, 5, 2, B); gq(8, -9 - flap, 4, 1, IN); gq(6, -7 - flap, 3, 1, IN);
+  // head
+  gq(-5, -7, 11, 8, B); gq(-4, -8, 9, 1, BL); gq(-5, -7, 1, 7, BL); gq(5, -6, 1, 7, BD);
+  // eyes
+  gq(-3, -5, 3, 3, E); gq(2, -5, 3, 3, E); gq(-2, -5, 1, 1, '#f4f4f4'); gq(3, -5, 1, 1, '#f4f4f4');
+  // nose + grin
+  gq(0, -2, 2, 1, '#1b2350'); gq(-2, 0, 6, 1, BD);
+  // body + digging arms
+  gq(-3, 1, 7, 4, B); gq(-3, 1, 7, 1, BL);
+  const dig = Math.sin(t * 22) > 0 ? 1 : -1;
+  gq(4, 1 + dig, 3, 2, BL); gq(-5, 2 - dig, 2, 2, BD);
+  gq(-2, 5, 2, 1, BD); gq(2, 5, 2, 1, BD);
+}
+function drawCritters() {
+  for (const c of S.critters) {
+    glow(c.x, c.y, 8, '#41a6f6', 0.3);
+    drawGlitch(c.x, c.y, c.dir, c.t);
+    if (c.life - c.t < 1.5 && blink()) txtS('BYE!', c.x, c.y - 14, P.cyan, 1, 'c');
+  }
+}
+
 // ---------------------------------------------------------------- update
 function update(dt) {
   S.t += dt;
@@ -1866,6 +2051,7 @@ function update(dt) {
   pumpAll(dt);
   for (const h of S.haulers) updateHauler(h, dt);
   updateScans(dt);
+  updateCritters(dt);
   for (const p of S.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.life -= dt; }
   S.parts = S.parts.filter(p => p.life > 0);
   for (const f of S.floats) { f.y -= 12 * dt; f.life -= dt; }
@@ -2244,6 +2430,7 @@ function drawPreview() {
 }
 function drawGhost() {
   if (!S.tool || overUI()) return;
+  if (S.tool === 'glitch') { if (mouse.y > UG_TOP + 6) { ctx.globalAlpha = 0.7; drawGlitch(mouse.x, mouse.y, 1, GT); ctx.globalAlpha = 1; } return; }
   if (S.tool === 'blast') {
     const R = (st.blastR() + 0.5) * CELL, ok = mouse.y > UG_TOP + 2 && S.blasts > 0;
     const col = ok ? (blink() ? P.orange : P.yellow) : P.red;
@@ -2349,7 +2536,7 @@ function drawMessages() {
 function tutorialHint() {
   if (G.sector > 1) return null;
   const mine = myRigs();
-  if (!S.plots.some(p => p.owner === 'you')) return 'BUY A PLOT OF LAND - CLICK A "BUY" SIGN';
+  if (!S.plots.some(p => p.owner === 'you')) return 'WIN A PLOT AT AUCTION - CLICK AN "AUCTION" SIGN';
   if (!S.scans.length && !S.segs.some(s => s.owner === 'you')) return 'SCAN FOR VOIDCRUDE [4], THEN CLICK ON YOUR PLOT';
   if (!mine.length) return 'BUILD A RIG [1] ON YOUR PLOT ABOVE THE CRUDE';
   if (!S.segs.some(s => s.owner === 'you')) return 'CLICK YOUR RIG, THEN CLICK UNDERGROUND - EACH CLICK ADDS A PIPE JOINT';
@@ -2370,7 +2557,7 @@ function drawPlotButtons() {
     if (p.owner) continue;
     const cx = p.x0 + PLOT_W / 2;
     rect(cx, SURF - 6, 1, 6, P.gray);
-    button(cx - 27, SURF - 17, 54, 11, 'BUY $' + fmt(plotCost(p)), () => buyPlot(p), { color: P.teal, hc: P.green });
+    button(cx - 30, SURF - 17, 60, 11, 'AUCTION $' + fmt(Math.max(50, Math.round(plotCost(p) * 0.6 / 10) * 10)), () => startAuction(p, 'you'), { color: P.teal, hc: P.green });
     if (has('survey')) {
       const rank = [...S.plots].sort((a, b) => b.oil - a.oil).indexOf(p);
       const [label, col] = rank < 2 ? ['RICH', P.lime] : rank < 4 ? ['FAIR', P.yellow] : ['POOR', P.red];
@@ -2398,13 +2585,13 @@ function drawBottomBar() {
   button(x, by, 74, bh, '3 HAULER $' + COST.hauler, buyHauler); x += 76;
   button(x, by, 58, bh, '4 SCAN $' + st.scanCost(), () => setTool('scan'), { active: S.tool === 'scan' }); x += 60;
   button(x, by, 66, bh, '5 BLAST ' + S.blasts + '/' + st.blastMax(), () => setTool('blast'), { active: S.tool === 'blast', color: S.blasts ? P.red : P.dgray, hc: P.orange }); x += 68;
-  drawAbilityButton(x, by, 92, bh); x += 94;
-  button(x, by, 62, bh, '6 BLACK MKT', () => { S.bm = true; S.tool = null; sfx('click'); }, { color: '#2a1420', hc: P.plum, tc: P.orange });
-  button(W - 130, by, 26, bh, S.paused ? '>' : 'II', togglePause);
-  button(W - 102, by, 26, bh, 'X' + S.speed, cycleSpeed, { active: S.speed > 1 });
+  button(x, by, 56, bh, '7 GLITCH $' + COST.glitch, () => setTool('glitch'), { active: S.tool === 'glitch', color: '#1d3f6e', hc: P.blue, tc: P.cyan }); x += 58;
+  drawAbilityButton(x, by, 74, bh); x += 76;
+  button(x, by, 50, bh, '6 BLK MKT', () => { S.bm = true; S.tool = null; sfx('click'); }, { color: '#2a1420', hc: P.plum, tc: P.orange });
+  button(W - 102, by, 26, bh, S.paused ? '>' : 'II', togglePause);
   button(W - 74, by, 34, bh, Sound.sfx ? 'SFX' : 'sfx', toggleSfx, { tc: Sound.sfx ? P.white : P.gray });
   button(W - 38, by, 34, bh, Sound.music ? 'MUS' : 'mus', toggleMusic, { tc: Sound.music ? P.white : P.gray });
-  if (inRect(mouse, 2, 341, 438, 19) && (mouse.x < 20 || mouse.x >= 350)) drawCharTip();
+  if (inRect(mouse, 2, 341, 484, 19) && (mouse.x < 20 || (mouse.x >= 408 && mouse.x < 484))) drawCharTip();
 }
 function haulerLabel(h) {
   switch (h.state) {
@@ -2420,7 +2607,7 @@ function drawSelPanel() {
   selPanelRect = null;
   let lines = null, btns = [];
   if (S.tool) {
-    lines = [{ rig: 'BUILD RIG: CLICK ON LAND YOU OWN', silo: 'BUILD SILO: PLACE NEXT TO YOUR RIGS', scan: 'SCAN: CLICK ANYWHERE ON THE SURFACE', blast: 'ROCK BLASTER: CLICK UNDERGROUND (' + S.blasts + ' CHARGES LEFT)' }[S.tool], 'RIGHT-CLICK OR ESC TO CANCEL'];
+    lines = [{ rig: 'BUILD RIG: CLICK ON LAND YOU OWN', silo: 'BUILD SILO: PLACE NEXT TO YOUR RIGS', scan: 'SCAN: CLICK ANYWHERE ON THE SURFACE', blast: 'ROCK BLASTER: CLICK UNDERGROUND (' + S.blasts + ' CHARGES LEFT)', glitch: 'GLITCH: CLICK UNDERGROUND - IT DIGS AROUND AND SNIFFS OUT GAS' }[S.tool], 'RIGHT-CLICK OR ESC TO CANCEL'];
   } else if (S.sel) {
     const o = S.sel.ref;
     if (S.sel.kind === 'rig') {
@@ -2557,6 +2744,7 @@ function renderPlay() {
   drawPlotLines();
   drawScanWaves();
   drawPipes();
+  drawCritters();
   drawPreview();
   for (const s of S.stations) drawStation(s);
   drawPlotFlags();
@@ -2583,6 +2771,7 @@ function renderPlay() {
   drawTaunt();
   if (S.abil.on > 0) txtS(CHAR().active.name + ' ACTIVE - ' + S.abil.on + ' DAYS', 320, 304, blink() ? P.yellow : P.orange, 1, 'c');
   if (S.bm) drawBlackMarket();
+  if (S.auction) drawAuction();
   if (S.choice) drawCards();
   if (S.paused) drawPauseMenu();
   if (S.help) drawHelpPanel(() => { S.help = false; });
@@ -3043,14 +3232,15 @@ function pipeGrab(x, y) {
   return best;
 }
 function playDown(p) {
-  if (S.paused || S.help || S.choice || S.bm || S.tool) return;
+  if (S.paused || S.help || S.choice || S.bm || S.auction || S.tool) return;
   S.drag = null;
   const r = rigAt(p.x, p.y);
   if (r && r.owner === 'you') { S.drag = { kind: 'pipe', rig: r, start: jointsOf(r)[0] }; return; }
   if (p.y > UG_TOP) { const g = pipeGrab(p.x, p.y); if (g) S.drag = { kind: 'pipe', rig: g.rig, start: g.start }; }
 }
 function playUp(p) {
-  if (S.paused || S.help || S.choice || S.bm) return;
+  if (S.paused || S.help || S.choice || S.bm || S.auction) return;
+  if (S.tool === 'glitch') { releaseGlitch(p.x, p.y); return; }
   if (S.tool === 'blast') { if (p.y < 341) blast(p.x, p.y); return; }
   if (S.tool) { if (p.y > 13 && p.y < 341) placeAt(S.tool, Math.round(p.x / 4) * 4); return; }
   const d = S.drag; S.drag = null;
@@ -3111,6 +3301,7 @@ addEventListener('keydown', e => {
   if (screen !== 'play' || !S) return;
   const k = e.key.toLowerCase();
   if (S.choice) { const i = '123'.indexOf(k); if (i >= 0 && S.choice[i]) pickPerk(i); return; }
+  if (S.auction && !S.paused) { if (k === 'b') auctionBid('you'); else if (k === 'escape') auctionPass(); return; }
   if (S.bm && k !== 'escape' && k !== '6') return;
   if (k === ' ' || k === 'p') { togglePause(); e.preventDefault(); return; }
   if (k === 'escape') { if (S.bm) S.bm = false; else if (S.help) S.help = false; else if (S.pen) S.pen = null; else if (S.tool || S.sel) { S.tool = null; S.sel = null; } else togglePause(); return; }
@@ -3120,6 +3311,7 @@ addEventListener('keydown', e => {
   else if (k === '3') buyHauler();
   else if (k === '5') setTool('blast');
   else if (k === '6') { S.bm = !S.bm; S.tool = null; }
+  else if (k === '7') setTool('glitch');
   else if (k === 'q') useAbility();
   else if (k === '4') setTool('scan');
   else if (k === 'f') cycleSpeed();
@@ -3141,7 +3333,8 @@ const STEP = 1 / 60;
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now; GT += dt;
-  if (screen === 'play' && S && !S.paused && !S.help && !S.choice && !S.bm) {
+  if (screen === 'play' && S && S.auction && !S.paused && !S.help) updateAuction(dt);
+  if (screen === 'play' && S && !S.paused && !S.help && !S.choice && !S.bm && !S.auction) {
     acc += dt * S.speed;
     let n = 0;
     while (acc >= STEP && n < 24) { update(STEP); acc -= STEP; n++; if (screen !== 'play') break; }
