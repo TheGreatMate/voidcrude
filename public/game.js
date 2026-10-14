@@ -1282,7 +1282,7 @@ function orderDrill(r, start, tx, ty) {
   if (len < 4) return false;
   if (r.owner === 'you' && G.credits <= 1) { afford(1e9); return false; }
   const s = { id: S.segs.length, rig: r.id, owner: r.owner, x1: start.x, y1: start.y,
-    ux: (tx - start.x) / len, uy: (ty - start.y) / len, len, prog: 0, status: 'queued', parent: start.seg, tPar: start.t };
+    ux: (tx - start.x) / len, uy: (ty - start.y) / len, len, prog: 0, status: 'queued', parent: start.seg, tPar: start.t, tx, ty };
   S.segs.push(s); r.segs.push(s.id);
   if (r.owner === 'you') sfx('click');
   return true;
@@ -1346,6 +1346,12 @@ function updateDrill(r, dt) {
     if (s.parent >= 0) {
       const p = S.segs[s.parent];
       if ((p.status === 'stop' || p.status === 'gone') && p.prog < s.tPar - 0.5) { s.status = 'gone'; return; }
+      if (p.status === 'done' && p.prog < s.tPar - 0.5) {
+        // the previous run struck crude early: continue from where the pipe really ends toward this run's joint
+        const ex = p.x1 + p.ux * p.prog, ey = p.y1 + p.uy * p.prog, len = Math.hypot(s.tx - ex, s.ty - ey);
+        if (len < 2) { s.status = 'gone'; return; }
+        s.x1 = ex; s.y1 = ey; s.ux = (s.tx - ex) / len; s.uy = (s.ty - ey) / len; s.len = len; s.tPar = p.prog;
+      }
     }
     s.status = 'drill';
   }
@@ -1371,8 +1377,9 @@ function updateDrill(r, dt) {
         if (s.status !== 'drill') break;
       } else if (t === T_OIL) {
         const p = S.pockets[S.pid[ci]];
+        const tapped = r.pockets.has(p.id); // pipes pass through crude this rig already taps
         connect(r, p);
-        if (p.amt > 0.5) {
+        if (p.amt > 0.5 && !tapped) {
           s.prog = Math.min(s.len, s.prog + 1); s.len = s.prog; s.status = 'done';
           if (mine) revealAround(nx, ny, 1);
           break;
