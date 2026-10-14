@@ -1,33 +1,50 @@
 # VOIDCRUDE
 
-A retro pixel-art space tycoon inspired by *Turmoil*. Buy asteroid plots, scan for glowing **voidcrude**, steer drill pipes around rock and gas pockets, pump the crude into rigs, and let automatic haulers ferry it to the HELIX or NOVA refinery while prices change. The rival Syndicate is buying land and draining the same pockets. Spend profits between sectors on upgrades and Consortium shares. Own 51 shares to win.
+A retro pixel-art space tycoon inspired by *Turmoil*. Bid on asteroid plots, scan for glowing **voidcrude**, steer drill pipes around rock and gas, and let automatic haulers ferry the crude to the HELIX or NOVA refinery while prices swing. Rival corporations fight you for land, pockets and, in the end, control of the Colonial Consortium. Own 51 shares to win.
 
-## Progression
+## The campaign
 
-- **Land auctions:** every plot is won by bidding against the rivals. Each sector opens with an auction round, any free plot can be put up for auction, and rival land grabs go to auction too. Every bid resets the clock: going once, going twice, sold.
-- **Glitch:** a $40 burrowing alien. Drop it underground and it scampers around, revealing a tunnel and sniffing out whole gas pockets.
+Six belts of three sectors each (about 1.5 to 2 hours). Each belt adds a hazard and keeps the earlier ones:
 
-- **Tycoons:** pick 1 of 6 characters, each with a passive bonus and an active ability on `Q` (with a cooldown). Three start unlocked; the other three unlock with Legacy points.
-- **Rival corporations:** The Syndicate (grabs land), Kroll Mining (dumps crude to crash prices) and Hex Corp (sabotages your rigs). Each owns its own shares and taunts you. Any rival reaching 51 shares ends the run.
-- **Black market (`6`):** pay credits to sabotage a rival, bribe the land registry, plant a price rumor, short a rival's stock, or take a quick loan.
-- **Sector picker:** between sectors, choose 1 of 3 sectors. Each has its own rivals, modifiers (Gas-rich, Rocky, Boom Market, Unstable, and more) and a research multiplier.
-- **Legacy (prestige):** every run, win or lose, earns Legacy points. Spend them on the title screen on permanent bonuses and character unlocks.
+| Belt | Hazard | Counter |
+|---|---|---|
+| 1 Fertile Drift | Crude only - learn the ropes | |
+| 2 Kessler Rocks | Solid rock blocks drills | Laser Bore, Rock Blaster (`5`) |
+| 3 Vapor Fields | Gas pockets cause blowouts | Glitch (`7`) sniffs them out, Gas Siphon |
+| 4 Writhing Deep | **Living crude** (pink) crawls and can slip off your pipes | Bio-Anchors |
+| 5 Glacier Belt | **Cryo-crude** (icy blue) pumps at 30% | Heated Pipes, Thermal Core |
+| 6 The Void Reach | **Void storms** ground haulers and fry rigs | Storm Shields, Storm Hangars |
 
-- **Rank-ups (per sector):** selling crude, striking pockets and finishing contracts earn XP. Every rank up pauses the game and deals 3 perk cards (common, rare or epic) to pick from, e.g. Overclock, Prefab Rig, Prospector, Sabotage, Overtime, Motherlode.
-- **Contracts:** HELIX and NOVA post timed delivery contracts that pay credits plus Research Data (RD).
-- **Tech tree (permanent):** RD buys nodes across 4 branches (Drilling, Extraction, Logistics, Markets), each ending in a capstone. Drilling includes **Pipe Couplers**: drill one rig's pipe into another's and every rig in the network shares its pockets. Credits go to buildings and shares.
-- **Rock Blaster:** `5`, then click underground to shatter rock and ignite gas safely. You get 3 charges per sector, upgradable with RD to 10, and the blast radius grows at 6 and 9 charges.
-- **Achievements:** 16 one-time goals that pay out RD.
+- **Campaign map:** every step offers two sectors with different rivals and conditions (Bonanza, Boom Market, Unstable quakes and more). Harder picks pay bigger sector bonuses.
+- **One currency:** upgrades and shares cost the same credits, so every upgrade is money you aren't saving for the stock auction.
+- **Workshop:** upgrades across five branches (Drilling, Extraction, Logistics, Markets, Frontier) unlock as you reach each belt. Drilling includes **Pipe Couplers** (drill one rig's pipe into another's and the network shares its pockets).
+- **Stock auctions:** shares only sell after belts 2 to 6, in falling-price lots: wait for a bargain, but a rival may buy first. Rivals bank cash every sector (watch their war chests on the map) and upgrade their own rigs. If nobody has 51 after the final belt, the smallest shareholder is eliminated and their stock is re-auctioned until someone does.
+- **Sector bonuses:** drain all the crude under your land, sell every drop, clear all gas, or withdraw early.
+- **Land auctions:** every plot is won by bidding. Each sector opens with an auction round, any free plot can be auctioned, and rival land grabs go to auction too.
+- **The Cantina:** between sectors, Moxie, Old Zeke and Sly Vex sell one-sector deals: hot tips, cheap rigs, price fixes, hired muscle and side bets.
+- **Minimum sell price:** set a floor on each refinery; haulers hold their crude until the price beats it.
+- **Difficulty:** Easy, Normal or Hard on the character screen (Hard pays 50% more Legacy).
 
-It's pure HTML5 canvas with no dependencies, served by nginx. Saves are stored in the browser's localStorage after each sector.
+## Also in the game
+
+- **Tycoons:** 6 characters, each with a passive bonus and an active ability on `Q`. Three unlock with Legacy points.
+- **Rivals:** The Syndicate (grabs land), Kroll Mining (crashes prices) and Hex Corp (sabotages rigs), with taunts.
+- **Black market (`6`):** sabotage a rival, bribe the land registry, plant a price rumor, short a rival's stock, or take a quick loan.
+- **Rank-ups:** selling and striking crude earns XP; each rank deals 3 perk cards to pick from.
+- **Contracts:** refineries post timed delivery jobs for credits.
+- **Achievements:** 16 one-time goals that pay credits.
+- **Legacy:** every run, win or lose, earns points for permanent bonuses and character unlocks.
+- **Stats:** profit per sector, your crude against each rival's, station split and war chests.
+
+It's pure HTML5 canvas with no dependencies, served by nginx. Progress saves in the browser between sectors and every few days during a sector, so **Continue Sector** picks up where you left off.
 
 ## Finishing early
 
-Out of crude? End the sector early from the pause menu, or click the top-bar prompt that replaces the day counter once every pocket your rigs tap is dry. Rivals still pump through the skipped days, leftover crude sells at 40%, and you earn +1 RD per 20 days saved.
+Out of crude? End the sector early from the pause menu, or click the top-bar prompt that replaces the day counter once every pocket your rigs tap is dry. Rivals still pump through the skipped days, leftover crude sells at 40%, and you earn the early-withdrawal bonus.
 
 ## Money
 
-Every sector starts with at least $2,000. Short on cash? Borrow in $1,000 steps from the shop or the black market (20% interest per sector, repay in the shop).
+Every sector starts with at least $2,000. Short on cash? Borrow in $1,000 steps from the workshop, the black market or the stock auction (20% interest per sector, repay in the workshop).
 
 ## Install on Unraid
 
@@ -97,7 +114,8 @@ docker run -d --name voidcrude -p 8088:80 voidcrude:latest
 | Click a refinery, or ► on its price panel | Move one of your haulers to that side |
 | ◄ on a refinery's price panel | Move one of its haulers to the other side |
 | Click a hauler, then a refinery | Switch that hauler's side |
-| `Space` | Pause menu (includes **End Sector Early**) |
+| `Space` | Pause menu (includes **End Sector Early**); buy the current lot at a stock auction |
+| `-` / `+` on a refinery panel | Set its minimum sell price |
 | `1X` `2X` `4X` (top bar) or `F` | Game speed |
 | `Tab` | Cycle haulers |
 | `Esc` / right-click | Cancel |

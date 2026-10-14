@@ -204,7 +204,7 @@ const HELP = [
   '5. HIT A PURPLE POCKET AND THE RIG PUMPS IT INTO ITS TANK.',
   '6. BUY HAULERS [3]. ASSIGN THEM WITH < > ON EACH REFINERY PANEL.',
   '   THEY FETCH AND SELL CRUDE BY THEMSELVES. LOANS: BLACK MARKET/SHOP.',
-  '7. SILOS [2] NEXT TO RIGS STORE THE OVERFLOW.',
+  '7. SILOS [2] STORE OVERFLOW. SET A MIN SELL PRICE ON EACH REFINERY.',
   '8. ROCK IN THE WAY? ROCK BLASTER [5] CLEARS IT. LIMITED CHARGES.',
   '',
   'PRICES SWING. DUMPING LOTS AT ONE STATION DROPS ITS PRICE.',
@@ -471,7 +471,7 @@ const st = {
   scanRx: () => 32 * (has('scan1') ? 1.3 : 1) * (isChar('kade') ? 1.4 : 1),
   scanRy: () => 96 * (has('scan1') ? 1.3 : 1) * (isChar('kade') ? 1.4 : 1),
   scanCost: () => COST.scan * (has('scan1') ? 0.5 : 1) * (isChar('kade') ? 0.5 : 1),
-  rigCost: () => pk('rig') > 0 ? 0 : COST.rig,
+  rigCost: () => pk('rig') > 0 ? 0 : COST.rig * (S && S.deal && S.deal.rigHalf ? 0.5 : 1),
   pipe: () => (has('pipe1') ? 0.7 : 1) * Math.pow(0.5, pk('pipe')) * (isChar('rusty') ? 0.85 : 1),
   sellMul: () => 1 + 0.08 * (has('broker1') + has('broker2')) + 0.15 * pk('price') + (isChar('mara') ? 0.1 : 0) + 0.03 * lv('savvy'),
   satMul: () => has('maker') ? 0.25 : 1,
@@ -511,7 +511,7 @@ function endRun(win) {
   const pts = Math.round((5 + 3 * (G.sector - 1) + Math.floor(G.shares / 3) + (win ? 30 : 0)) * DF().legacy);
   G.legacyEarned = pts;
   META.legacy += pts; META.runs++; if (win) META.wins++;
-  saveMeta(); clearSave();
+  saveMeta(); clearSave(); clearSectorSave();
   screen = win ? 'victory' : 'defeat';
 }
 function buyLegacy(l) {
@@ -617,6 +617,7 @@ function newGame(charId) {
   const rc = Math.round(3000 * DIFFS[G.diff].rival);
   G.rcash = { syn: rc, kroll: rc, hex: rc }; G.rtech = { syn: 0, kroll: 0, hex: 0 };
   genMap();
+  clearSectorSave();
   mapSel = null;
   screen = 'map';
 }
@@ -941,8 +942,10 @@ function genSector(opt) {
   }
   const base = (11 + (belt - 1) * 1.6) * (mods.includes('boom') ? 1.25 : mods.includes('slump') ? 0.8 : 1);
   S.stations = [mkStation('HELIX', 28, base, rng), mkStation('NOVA', 612, base, rng)];
+  S.stations.forEach((st2, i) => { st2.floor = (G.floors || [0, 0])[i]; });
   if (mods.includes('boom')) for (const s of S.stations) s.amp = 1.6;
   S.blasts = st.blastMax();
+  applyDeals();
   buildDirt(); buildFog(); buildSky(); buildPipeLayer();
   if (has('fleet')) { spawnHauler(); spawnHauler(); }
   if (isChar('bolt')) spawnHauler();
@@ -1677,9 +1680,21 @@ function updateHauler(h, dt) {
       if (flyTo(h, tx, ty, dt)) h.state = 'selling';
       break;
     }
+    case 'holding': {
+      const s = h.target, [tx, ty] = dock(s);
+      flyTo(h, tx, ty - 6 - (h.id % 3) * 5, dt);
+      if (s.closed > 0) { goSell(h); break; }
+      if (price(s) >= floorOf(s)) h.state = 'toSell';
+      break;
+    }
     case 'selling': {
       const s = h.target;
       if (s.closed > 0) { goSell(h); break; }
+      if (floorOf(s) > 0 && price(s) < floorOf(s)) {
+        h.state = 'holding';
+        if (!s.holdMsg || GT - s.holdMsg > 20) { s.holdMsg = GT; msg('HAULERS HOLDING AT ' + s.name + ' - PRICE IS BELOW YOUR MINIMUM', P.orange); }
+        break;
+      }
       const u = Math.min(25 * st.hRate() * dt, h.cargo);
       const v = u * price(s);
       h.cargo -= u; h.sale += v;
@@ -1843,6 +1858,7 @@ function daily() {
   rivalDaily(d);
   if (d >= S.nextEvent) { randomEvent(); S.nextEvent = d + 14 + Math.random() * 14; }
   if (d === S.days - 10) { msg('10 DAYS LEFT IN THIS SECTOR', P.yellow); sfx('alert'); }
+  if (d % 5 === 0) saveSector();
   if (d >= S.days) endSector();
 }
 function daysLeft() { return Math.max(0, S.days - Math.floor(S.day)); }
@@ -1891,6 +1907,11 @@ function endSector() {
   const avgBase = (S.stations[0].base + S.stations[1].base) / 2;
   const rivalRep = rivalYear(avgBase);
   const bonuses = sectorBonuses(crude);
+  if (S.deal && S.deal.bet) {
+    const b = S.deal.bet, theirs = S.rv[b.rival] ? S.rv[b.rival].pumped : 0;
+    if (S.stats.sold > theirs) bonuses.push(['SIDE BET WON VS ' + RIVALS[b.rival].short, b.stake * 2]);
+    else bonuses.push(['SIDE BET LOST VS ' + RIVALS[b.rival].short, 0]);
+  }
   for (const [, v] of bonuses) G.credits += v;
   const bonusTotal = bonuses.reduce((a, b) => a + b[1], 0);
   const interest = Math.round(G.debt * LOAN_RATE);
@@ -1904,6 +1925,7 @@ function endSector() {
     profit: Math.round(S.stats.revenue + S.stats.gas + fire + bonusTotal - S.stats.spent), rivals: Object.fromEntries(rivalRep.map(r => [r.id, Math.round(r.pumped)])) });
   G.sector++;
   save();
+  clearSectorSave();
   screen = 'summary';
   sfx('fanfare');
 }
@@ -1923,7 +1945,7 @@ function startAuction(plot, opener) {
     bid: 0, leader: null, timer: 6, max: {}, next: {}, out: { you: false }, log: [], done: 0 };
   for (const id of S.rivals) {
     if (!rivalCanBid(id)) { a.out[id] = true; continue; }
-    const greed = (id === 'syn' ? 1.15 + Math.random() * 0.55 : 0.85 + Math.random() * 0.5) * DF().rival;
+    const greed = (id === 'syn' ? 1.15 + Math.random() * 0.55 : 0.85 + Math.random() * 0.5) * DF().rival * (S.deal && S.deal.muscle ? 0.8 : 1);
     a.max[id] = Math.round(list * greed * (0.75 + rich * 0.5) / 10) * 10;
     a.next[id] = 0.8 + Math.random() * 1.2;
   }
@@ -2400,6 +2422,7 @@ function renderMap() {
     txt('$' + fmt(G.rcash[id]) + '  TECH ' + G.rtech[id].toFixed(1), 456, y + 9, P.gray);
   });
   button(12, 338, 130, 16, '< WORKSHOP', () => { screen = 'shop'; sfx('click'); }, { color: P.dgray });
+  button(150, 338, 90, 16, 'STATS', () => { TS.statsBack = 'map'; screen = 'stats'; sfx('click'); }, { color: P.dblue });
   const ok = mapSel != null;
   button(430, 338, 200, 16, ok ? 'LAUNCH SECTOR ' + cur + ' >>' : 'PICK A SECTOR FIRST', () => {
     G.path[cur - 1] = mapSel;
@@ -2492,6 +2515,192 @@ function drawStorm() {
     glow(b.x, SURF / 2, 60, '#c46cff', 0.35);
     rect(0, 0, W, H, 'rgba(230,200,255,' + (0.18 * (1 - (GT - b.t) / 0.25)).toFixed(3) + ')');
   }
+}
+
+// ---------------------------------------------------------------- minimum sell price per refinery (Turmoil-style)
+function setFloor(side, delta) {
+  G.floors = G.floors || [0, 0];
+  G.floors[side] = clamp((G.floors[side] || 0) + delta, 0, 60);
+  S.stations[side].floor = G.floors[side];
+  sfx('click');
+}
+function floorOf(s) { return s.floor || 0; }
+
+// ---------------------------------------------------------------- mid-sector autosave
+const SECTOR_KEY = 'voidcrude_sector_v1';
+function hasSectorSave() { try { return !!localStorage.getItem(SECTOR_KEY); } catch (e) { return false; } }
+function clearSectorSave() { try { localStorage.removeItem(SECTOR_KEY); } catch (e) { } }
+function saveSector() {
+  if (!S || screen !== 'play') return;
+  const ref = o => o ? { kind: o.kind, id: o.kind === 'station' ? S.stations.indexOf(o) : o.id } : null;
+  const data = {
+    v: 1,
+    s: {
+      t: S.t, day: S.day, lastDay: S.lastDay, dayLen: S.dayLen, days: S.days, nid: S.nid, belt: S.belt, mods: S.mods, rivals: S.rivals, payMul: S.payMul,
+      name: S.name, flare: S.flare, jam: S.jam, nextQuake: S.nextQuake, nextEvent: S.nextEvent, bribe: S.bribe, xp: S.xp, rank: S.rank, pending: S.pending,
+      blasts: S.blasts, blasted: S.blasted, perks: S.perks, abil: S.abil, bmUses: S.bmUses, storm: S.storm || null, stats: S.stats, rv: S.rv, deal: S.deal || {},
+      grid: Array.from(S.grid), pid: Array.from(S.pid), rev: Array.from(S.rev), pcell: Array.from(S.pcell), joints: S.joints,
+      pockets: S.pockets, gases: S.gases, plots: S.plots, segs: S.segs.map(s => ({ ...s, drawn: 0, capped: false })),
+      rigs: S.rigs.map(r => ({ id: r.id, kind: r.kind, x: r.x, owner: r.owner, tank: r.tank, pockets: [...r.pockets], segs: r.segs, offline: r.offline,
+        tries: r.tries || 0, tried: r.tried ? [...r.tried] : [], nextTry: r.nextTry || 0, links: r.links ? [...r.links].map(o => o.id) : [] })),
+      silos: S.silos.map(x => ({ kind: 'silo', id: x.id, x: x.x, tank: x.tank })),
+      haulers: S.haulers.map(h => ({ ...h, target: ref(h.target) })),
+      stations: S.stations, scans: S.scans.filter(sc => sc.done).map(sc => ({ x: sc.x, done: true, t: 1, dur: 1, rx: sc.rx, ry: sc.ry })),
+    },
+    g: G,
+  };
+  try { localStorage.setItem(SECTOR_KEY, JSON.stringify(data)); } catch (e) { }
+}
+function loadSector() {
+  let data;
+  try { data = JSON.parse(localStorage.getItem(SECTOR_KEY) || 'null'); } catch (e) { return false; }
+  if (!data || !data.s) return false;
+  G = data.g;
+  const d = data.s;
+  S = {
+    ...d, rng: mulberry32((Math.random() * 1e9) | 0), speed: 1, paused: true, help: false, shake: 0,
+    grid: Uint8Array.from(d.grid), pid: Int16Array.from(d.pid), rev: Uint8Array.from(d.rev), pcell: Int32Array.from(d.pcell),
+    parts: [], floats: [], msgs: [], sel: null, tool: null, drag: null, auction: null, auctionQueue: [], critters: [],
+    choice: null, taunt: null, bm: false, twinkles: [],
+  };
+  S.rigs = d.rigs.map(r => ({ ...r, pockets: new Set(r.pockets), tried: new Set(r.tried), links: new Set(), dead: false }));
+  for (const r of S.rigs) r.links = new Set(d.rigs.find(x => x.id === r.id).links.map(id => S.rigs.find(o => o.id === id)).filter(Boolean));
+  S.silos = d.silos.map(x => ({ ...x, dead: false }));
+  const deref = t => !t ? null : t.kind === 'station' ? S.stations[t.id] : t.kind === 'silo' ? S.silos.find(x => x.id === t.id) : S.rigs.find(x => x.id === t.id);
+  S.haulers = d.haulers.map(h => ({ ...h, target: deref(h.target) }));
+  relink();
+  buildDirt(); buildFog(); buildSky(); buildPipeLayer();
+  for (let i = 0; i < S.rev.length; i++) if (S.rev[i]) S.fogX.clearRect(i % COLS, (i / COLS) | 0, 1, 1);
+  S.fogDirty = true;
+  for (let k = 0; k < 24; k++) S.twinkles.push({ x: (Math.random() * W) | 0, y: 14 + ((Math.random() * 60) | 0), f: 0.3 + Math.random(), p: Math.random() });
+  msg('WELCOME BACK - SECTOR RESTORED. PRESS SPACE TO RESUME', P.cyan);
+  if (S.pending > 0) offerCards();
+  screen = 'play';
+  return true;
+}
+
+// ---------------------------------------------------------------- the Cantina: shady deals between sectors
+const CANTINA_FOLK = {
+  moxie: { name: 'MOXIE', role: 'BARTENDER BOT', look: { bg: '#29366f', skin: '#94b0c2', hair: '#ef7d57', style: 'helmet', eye: '#ffcd75', acc: 'visor', suit: '#566c86' } },
+  zeke: { name: 'OLD ZEKE', role: 'RETIRED PROSPECTOR', look: { bg: '#5b4038', skin: '#d39b6a', hair: '#f4f4f4', style: 'short', eye: '#1a1c2c', acc: 'beard', suit: '#7a3a20', hat: '#8a6352' } },
+  sly: { name: 'SLY VEX', role: 'FIXER', look: { bg: '#1a1c2c', skin: '#a7f070', hair: '#5d275d', style: 'slick', eye: '#ffcd75', acc: 'monocle', suit: '#5d275d' } },
+};
+const DEALS = [
+  { id: 'tip', who: 'zeke', name: 'A HOT TIP', desc: 'NEXT SECTOR, THE RICHEST PLOT IS FLAGGED "TIP" AND RATED', quip: 'I SMELL CRUDE THE WAY YOU SMELL COFFEE.', cost: b => 500 * b },
+  { id: 'rigs', who: 'moxie', name: 'BULK RIG ORDER', desc: 'RIGS COST 50% LESS ALL NEXT SECTOR', quip: 'A CRATE FELL OFF A FREIGHTER. SEVERAL CRATES.', cost: b => 700 * b },
+  { id: 'fix', who: 'sly', name: 'PRICE FIX', desc: 'ONE REFINERY PAYS +25% FOR THE FIRST 30 DAYS', quip: 'THE BUYER AT THE DOCK OWES ME. BIG.', cost: b => 900 * b },
+  { id: 'muscle', who: 'sly', name: 'HIRED MUSCLE', desc: 'RIVALS BID 20% LESS AT LAND AUCTIONS NEXT SECTOR', quip: 'MY FRIENDS CAN BE VERY PERSUASIVE.', cost: b => 800 * b },
+  { id: 'hauler', who: 'moxie', name: 'SMUGGLED HAULER', desc: 'A FREE HAULER WAITS FOR YOU NEXT SECTOR', quip: 'NO PAPERWORK. NO QUESTIONS.', cost: b => 150 * b },
+  { id: 'bet', who: 'zeke', name: 'SIDE BET', desc: 'BET YOU SELL MORE CRUDE THAN YOUR NEXT RIVAL PUMPS. WIN = 2X', quip: 'A LITTLE WAGER KEEPS AN OLD MAN YOUNG.', cost: b => 1000 * b },
+];
+function cantinaOffers() {
+  if (!G.cantina || G.cantina.sector !== G.sector) {
+    const rng = mulberry32((G.seed * 31 + G.sector * 53) >>> 0), pool = [...DEALS], offers = [];
+    while (offers.length < 3) offers.push(pool.splice(Math.floor(rng() * pool.length), 1)[0].id);
+    G.cantina = { sector: G.sector, offers, bought: [], fixSide: rng() < 0.5 ? 0 : 1 };
+  }
+  return G.cantina;
+}
+function buyDeal(d) {
+  const c = cantinaOffers(), cost = d.cost(beltOf(G.sector));
+  if (c.bought.includes(d.id) || G.credits < cost) { sfx('err'); return; }
+  G.credits -= cost; c.bought.push(d.id);
+  G.deals = G.deals || [];
+  G.deals.push(d.id === 'fix' ? 'fix' + c.fixSide : d.id);
+  if (d.id === 'bet') G.bet = cost;
+  sfx('cash'); save();
+}
+function applyDeals() {
+  S.deal = {};
+  for (const id of G.deals || []) {
+    if (id === 'tip') { const best = [...S.plots].sort((a, b) => b.oil - a.oil)[0]; best.tip = true; S.deal.tip = true; }
+    else if (id === 'rigs') S.deal.rigHalf = true;
+    else if (id === 'fix0' || id === 'fix1') { const s = S.stations[+id[3]]; s.mult = 1.25; s.multT = 30; }
+    else if (id === 'muscle') S.deal.muscle = true;
+    else if (id === 'hauler') spawnHauler();
+    else if (id === 'bet') S.deal.bet = { stake: G.bet || 0, rival: S.rivals[0] };
+  }
+  if ((G.deals || []).length) msg('CANTINA DEALS ACTIVE: ' + G.deals.length, P.orange);
+  G.deals = [];
+}
+function renderCantina() {
+  starfield(0.15);
+  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, 'rgba(60,24,30,0.55)'); g.addColorStop(1, 'rgba(20,8,14,0.85)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  txtS('THE RUSTY NEBULA CANTINA', 320, 10, P.orange, 2, 'c');
+  txt('DEALS LAST ONE SECTOR. NEW FACES EVERY SECTOR. CASH: $' + fmt(G.credits), 320, 30, P.lgray, 1, 'c');
+  const c = cantinaOffers(), belt = beltOf(G.sector);
+  c.offers.forEach((id, i) => {
+    const d = DEALS.find(x => x.id === id), f = CANTINA_FOLK[d.who], x = 14 + i * 206, y = 48, w = 198, h = 250;
+    const owned = c.bought.includes(id), cost = d.cost(belt);
+    panel(x, y, w, h, '#2a1420', owned ? P.lime : P.orange);
+    drawPortrait(f.look, x + w / 2 - 24, y + 10, 3);
+    txt(f.name, x + w / 2, y + 64, P.yellow, 1, 'c');
+    txt(f.role, x + w / 2, y + 73, P.gray, 1, 'c');
+    wrap('"' + d.quip + '"', 44).forEach((l, k) => txt(l, x + w / 2, y + 88 + k * 9, P.lgray, 1, 'c'));
+    txtS(d.name, x + w / 2, y + 122, P.white, 1, 'c');
+    const desc = id === 'fix' ? d.desc.replace('ONE REFINERY', S && S.stations ? ['HELIX', 'NOVA'][c.fixSide] : ['HELIX', 'NOVA'][c.fixSide]) : d.desc;
+    wrap(desc, 44).forEach((l, k) => txt(l, x + w / 2, y + 136 + k * 9, P.white, 1, 'c'));
+    txtS('$' + fmt(cost), x + w / 2, y + 180, P.yellow, 2, 'c');
+    if (owned) txtS('DEAL STRUCK', x + w / 2, y + 214, P.lime, 1, 'c');
+    else button(x + 30, y + 208, w - 60, 18, 'SHAKE ON IT', () => buyDeal(d), { disabled: G.credits < cost, color: P.plum, hc: P.crude });
+  });
+  if (G.bet && (G.deals || []).includes('bet')) txt('BET STAKE: $' + fmt(G.bet), 320, 306, P.orange, 1, 'c');
+  button(14, 330, 140, 16, '< WORKSHOP', () => { screen = 'shop'; sfx('click'); }, { color: P.dgray });
+}
+
+// ---------------------------------------------------------------- stats screen
+function renderStats() {
+  starfield(0.2);
+  txtS('CAMPAIGN STATS', 320, 8, P.crudeL, 2, 'c');
+  const hst = G.history || [];
+  if (!hst.length) { txt('FINISH A SECTOR TO SEE YOUR NUMBERS.', 320, 160, P.lgray, 1, 'c'); }
+  else {
+    // profit per sector
+    panel(10, 30, 400, 150, P.navy, P.gray);
+    txt('PROFIT PER SECTOR', 20, 37, P.yellow);
+    const mx = Math.max(1, ...hst.map(h => Math.abs(h.profit)));
+    const bw = Math.min(20, Math.floor(370 / TOTAL_SECTORS)), base = 110;
+    rect(20, base, 380, 1, P.gray);
+    hst.forEach((h, i) => {
+      const hgt = Math.round(Math.abs(h.profit) / mx * 60), x = 22 + i * (bw + 1);
+      rect(x, h.profit >= 0 ? base - hgt : base + 1, bw - 1, hgt, h.profit >= 0 ? P.green : P.red);
+      txt('' + h.s, x + bw / 2, 175 - 2, P.gray, 1, 'c');
+      if (inRect(mouse, x, 40, bw, 135)) txtS(h.name + ': $' + fmt(h.profit), 210, 50, P.white, 1, 'c');
+    });
+    txt('BEST $' + fmt(Math.max(...hst.map(h => h.profit))), 400, 37, P.lime, 1, 'r');
+    // crude: you vs rivals
+    panel(10, 186, 400, 140, P.navy, P.gray);
+    txt('CRUDE: YOU SOLD VS RIVALS PUMPED', 20, 193, P.yellow);
+    const series = [['you', P.cyan, h => h.sold], ...RIVAL_IDS.map(id => [id, rcol(id), h => (h.rivals || {})[id] || 0])];
+    const cm = Math.max(1, ...hst.flatMap(h => series.map(s2 => s2[2](h))));
+    for (const [id, col, f] of series) {
+      let prev = null;
+      hst.forEach((h, i) => {
+        const x = 30 + i * 21, y = 312 - Math.round(f(h) / cm * 100);
+        if (prev) { const n = Math.max(Math.abs(x - prev[0]), Math.abs(y - prev[1])); for (let t = 0; t <= n; t++) rect(Math.round(prev[0] + (x - prev[0]) * t / n), Math.round(prev[1] + (y - prev[1]) * t / n), 1, 1, col); }
+        rect(x - 1, y - 1, 3, 3, col);
+        prev = [x, y];
+      });
+    }
+    let lx = 30;
+    for (const [id, col] of series) { const label = id === 'you' ? 'YOU' : RIVALS[id].short; rect(lx, 202, 6, 4, col); txt(label, lx + 9, 201, col); lx += tw(label) + 22; }
+  }
+  // totals
+  panel(418, 30, 212, 296, P.navy, P.gray);
+  txt('CAMPAIGN TOTALS', 524, 37, P.yellow, 1, 'c');
+  const sum = f => hst.reduce((a, h) => a + (f(h) || 0), 0);
+  const rows = [['SECTORS PLAYED', '' + hst.length], ['LIFETIME EARNINGS', '$' + fmt(G.totalEarned)], ['CRUDE SOLD', fmt(sum(h => h.sold)) + 'U'],
+    ['SOLD AT HELIX', fmt(sum(h => h.helix)) + 'U'], ['SOLD AT NOVA', fmt(sum(h => h.nova)) + 'U'], ['YOUR SHARES', '' + G.shares],
+    ['DIFFICULTY', DF().name], ['DEBT', '$' + fmt(G.debt)]];
+  rows.forEach(([a, b], i) => { txt(a, 428, 52 + i * 12, P.lgray); txt(b, 620, 52 + i * 12, P.white, 1, 'r'); });
+  const hx = sum(h => h.helix), nv = sum(h => h.nova), tot = Math.max(1, hx + nv);
+  txt('STATION SPLIT', 524, 160, P.yellow, 1, 'c');
+  meter(428, 172, 192, 10, hx / tot, P.cyan);
+  txt('HELIX ' + Math.round(hx / tot * 100) + '%', 428, 186, P.cyan); txt(Math.round(nv / tot * 100) + '% NOVA', 620, 186, P.lgray, 1, 'r');
+  txt('RIVAL WAR CHESTS', 524, 206, P.yellow, 1, 'c');
+  RIVAL_IDS.forEach((id, i) => { txt(RIVALS[id].short, 428, 220 + i * 12, rcol(id)); txt('$' + fmt(G.rcash[id]) + '  ' + G.rshares[id] + 'SH', 620, 220 + i * 12, P.white, 1, 'r'); });
+  button(10, 334, 140, 16, '< BACK', () => { screen = TS.statsBack || 'shop'; sfx('click'); }, { color: P.dgray });
 }
 
 // ---------------------------------------------------------------- update
@@ -2948,7 +3157,7 @@ const SP_W = 70;
 function stationPanelX(s) { return s.x < 320 ? 2 : W - SP_W - 2; }
 function drawStationPanels() {
   S.stations.forEach((s, side) => {
-    const x0 = stationPanelX(s), y0 = 14, w = SP_W, h = s.job ? 46 : 37;
+    const x0 = stationPanelX(s), y0 = 14, w = SP_W, h = s.job ? 56 : 47;
     const hot = s.mult > 1, low = s.mult < 1, shut = s.closed > 0;
     panel(x0, y0, w, h, P.navy, shut ? P.red : (S.sel && S.sel.kind === 'hauler' && inRect(mouse, x0, y0, w, h) ? P.yellow : P.gray));
     txt(s.name, x0 + 4, y0 + 4, shut ? P.red : hot ? P.lime : low ? P.orange : P.cyan);
@@ -2978,10 +3187,17 @@ function drawStationPanels() {
       const py = sy + sh - 1 - Math.round((all[i] - mn) / ((mx - mn) || 1) * (sh - 1));
       rect(px, py, 1, 1, i < vals.length ? P.lime : P.orange);
     }
+    // minimum sell price: haulers hold their crude until the price beats it
+    const fl = floorOf(s), holding = fl > 0 && pr < fl;
+    if (fl > 0) { const fy = sy + sh - 1 - Math.round(clamp((fl - mn) / ((mx - mn) || 1), 0, 1) * (sh - 1)); for (let xx = sx; xx < sx + sw; xx += 3) rect(xx, fy, 1, 1, P.orange); }
+    txt('MIN SELL', x0 + 4, y0 + 37, holding ? (blink() ? P.orange : P.yellow) : P.lgray);
+    button(x0 + 37, y0 + 36, 8, 8, '-', () => setFloor(side, -1), { color: P.dblue, hc: P.blue });
+    txt(fl ? '$' + fl : 'OFF', x0 + 59, y0 + 37, holding ? P.orange : fl ? P.white : P.gray, 1, 'r');
+    button(x0 + 61, y0 + 36, 8, 8, '+', () => setFloor(side, 1), { color: P.dblue, hc: P.blue });
     if (s.job) {
       const j = s.job, left = j.deadline - Math.floor(S.day);
-      meter(sx, sy + 11, sw, 8, j.done / j.units, P.teal);
-      txt('JOB ' + Math.floor(j.done) + '/' + j.units + ' ' + left + 'D', x0 + w / 2, sy + 12.5, left <= 5 && blink() ? P.orange : P.white, 1, 'c');
+      meter(sx, sy + 21, sw, 8, j.done / j.units, P.teal);
+      txt('JOB ' + Math.floor(j.done) + '/' + j.units + ' ' + left + 'D', x0 + w / 2, sy + 22.5, left <= 5 && blink() ? P.orange : P.white, 1, 'c');
     }
   });
 }
@@ -3021,7 +3237,8 @@ function drawPlotButtons() {
     const cx = p.x0 + PLOT_W / 2;
     rect(cx, SURF - 6, 1, 6, P.gray);
     button(cx - 30, SURF - 17, 60, 11, 'AUCTION $' + fmt(Math.max(50, Math.round(plotCost(p) * 0.6 / 10) * 10)), () => startAuction(p, 'you'), { color: P.teal, hc: P.green });
-    if (has('survey')) {
+    if (p.tip) txtS('TIP!', cx, SURF - 33, P.orange, 1, 'c');
+    if (has('survey') || p.tip) {
       const rank = [...S.plots].sort((a, b) => b.oil - a.oil).indexOf(p);
       const [label, col] = rank < 2 ? ['RICH', P.lime] : rank < 4 ? ['FAIR', P.yellow] : ['POOR', P.red];
       txtS(label, cx, SURF - 25, col, 1, 'c');
@@ -3032,7 +3249,7 @@ function setTool(t) {
   if (t === 'blast' && S.blasts <= 0 && S.tool !== 'blast') { msg('NO BLASTER CHARGES LEFT - UPGRADE IT BETWEEN SECTORS', P.red); sfx('err'); return; }
   S.tool = S.tool === t ? null : t; S.sel = null; sfx('click');
 }
-function togglePause() { S.paused = !S.paused; S.help = false; sfx('click'); }
+function togglePause() { S.paused = !S.paused; S.help = false; if (S.paused) saveSector(); sfx('click'); }
 function cycleSpeed() { S.speed = S.speed === 1 ? 2 : S.speed === 2 ? 4 : 1; sfx('click'); }
 function toggleSfx() { Sound.sfx = !Sound.sfx; Sound.savePrefs(); sfx('click'); }
 function toggleMusic() { Sound.music = !Sound.music; Sound.init(); if (Sound.music) Sound.startMusic(); else Sound.stopMusic(); Sound.savePrefs(); }
@@ -3063,6 +3280,7 @@ function haulerLabel(h) {
     case 'loading': return h.wait > 1 ? 'TOPPING UP' : 'LOADING';
     case 'toSell': return 'FLYING TO ' + h.target.name;
     case 'selling': return 'SELLING AT ' + h.target.name;
+    case 'holding': return 'HOLDING - ' + h.target.name + ' BELOW YOUR MINIMUM';
   }
   return '';
 }
@@ -3111,7 +3329,7 @@ function drawTooltip() {
       else if (t === T_GAS) lines.push('GAS POCKET', has('gas') ? 'SIPHON READY - WORTH $$$' : 'DANGER: BLOWOUT!');
     }
   } else if (m.y > 13 && m.y < SURF + 4) {
-    const s = S.stations.find(s => (Math.abs(m.x - s.x) <= 26 && m.y > SURF - 44) || (m.y < 61 && m.x >= stationPanelX(s) && m.x <= stationPanelX(s) + SP_W));
+    const s = S.stations.find(s => (Math.abs(m.x - s.x) <= 26 && m.y > SURF - 44) || (m.y < 71 && m.x >= stationPanelX(s) && m.x <= stationPanelX(s) + SP_W));
     if (s) {
       lines.push(s.name + ' REFINERY', s.closed > 0 ? 'CLOSED ' + s.closed + ' DAYS' : 'PAYS $' + price(s).toFixed(2) + ' / UNIT');
       lines.push('HAULERS SELLING HERE: ' + S.haulers.filter(h => h.side === S.stations.indexOf(s)).length, '> OR CLICK: MOVE ONE HERE.  <: MOVE ONE AWAY');
@@ -3182,7 +3400,7 @@ function drawPauseMenu() {
   button(x + 20, y + 46, w - 40, 14, 'HOW TO PLAY', () => { S.help = true; S.paused = false; });
   button(x + 20, y + 64, w - 40, 14, 'CRT EFFECT: ' + (crt.classList.contains('off') ? 'OFF' : 'ON'), toggleCrt);
   button(x + 20, y + 82, w - 40, 14, 'END SECTOR EARLY', () => { S.paused = false; S.confirmEnd = true; }, { color: P.green, hc: P.lime, tc: P.navy });
-  button(x + 20, y + 104, w - 40, 14, 'QUIT TO TITLE (LOSE SECTOR)', () => { screen = 'title'; S = null; }, { color: P.red, hc: P.orange });
+  button(x + 20, y + 104, w - 40, 14, 'SAVE + QUIT TO TITLE', () => { saveSector(); screen = 'title'; S = null; }, { color: P.red, hc: P.orange });
 }
 function drawHelpPanel(onClose) {
   rect(0, 0, W, H, 'rgba(5,5,15,0.82)');
@@ -3317,7 +3535,7 @@ function renderTitle() {
   txt('AN ASTEROID DRILLING TYCOON', 320, 96, P.cyan, 1, 'c');
   let y = 122;
   button(250, y, 140, 16, 'NEW GAME', () => { screen = 'charselect'; TS.pickChar = TS.pickChar || 'rusty'; sfx('buy'); }); y += 20;
-  if (hasSave()) { button(250, y, 140, 16, 'CONTINUE', () => { if (loadGame()) { screen = 'shop'; sfx('buy'); } }); y += 20; }
+  if (hasSectorSave() || hasSave()) { button(250, y, 140, 16, hasSectorSave() ? 'CONTINUE SECTOR' : 'CONTINUE', () => { if ((hasSectorSave() && loadSector()) || (loadGame() && (screen = 'shop'))) sfx('buy'); }); y += 20; }
   button(250, y, 140, 16, 'LEGACY  (' + META.legacy + ' PTS)', () => { screen = 'legacy'; sfx('click'); }, { color: P.plum, hc: P.crude }); y += 20;
   button(250, y, 140, 16, 'HOW TO PLAY', () => { TS.help = true; sfx('click'); }); y += 20;
   button(250, y, 68, 13, 'SFX ' + (Sound.sfx ? 'ON' : 'OFF'), toggleSfx);
@@ -3487,6 +3705,8 @@ function renderShop() {
   button(494, y, 60, 14, 'REPAY 1K', () => repay(false), { disabled: !G.debt || G.credits < 1 });
   button(558, y, 64, 14, 'REPAY ALL', () => repay(true), { disabled: !G.debt || G.credits < 1 });
   button(6, 338, 120, 16, 'SAVE & EXIT', () => { save(); screen = 'title'; sfx('click'); }, { color: P.dgray });
+  button(134, 338, 130, 16, 'CANTINA', () => { screen = 'cantina'; sfx('click'); }, { color: '#5a2a1e', hc: P.orange, tc: P.yellow });
+  button(272, 338, 134, 16, 'STATS', () => { TS.statsBack = 'shop'; screen = 'stats'; sfx('click'); }, { color: P.dblue });
   button(414, 338, 220, 16, 'CAMPAIGN MAP >>', () => { screen = 'map'; mapSel = null; sfx('click'); }, { color: P.green, hc: P.lime, tc: P.navy });
 }
 function renderEnd(win) {
@@ -3643,7 +3863,7 @@ function stationAt(x, y) {
   for (const s of S.stations) {
     const x0 = stationPanelX(s);
     if (Math.abs(x - s.x) <= 26 && y >= SURF - 46 && y <= SURF + 2) return s;
-    if (x >= x0 && x <= x0 + SP_W && y >= 14 && y <= 60) return s;
+    if (x >= x0 && x <= x0 + SP_W && y >= 14 && y <= 70) return s;
   }
   return null;
 }
@@ -3751,7 +3971,8 @@ addEventListener('keydown', e => {
     S.sel = { kind: 'hauler', ref: order[(cur + 1) % order.length] }; S.tool = null; sfx('click');
   }
 });
-document.addEventListener('visibilitychange', () => { if (document.hidden && screen === 'play' && S && !S.paused) S.paused = true; });
+document.addEventListener('visibilitychange', () => { if (document.hidden && screen === 'play' && S) { if (!S.paused) S.paused = true; saveSector(); } });
+addEventListener('beforeunload', () => { if (screen === 'play' && S) saveSector(); });
 
 // ---------------------------------------------------------------- main loop
 let last = performance.now(), acc = 0;
@@ -3781,6 +4002,8 @@ function frame(now) {
   else if (screen === 'charselect') renderCharSelect();
   else if (screen === 'legacy') renderLegacy();
   else if (screen === 'map') renderMap();
+  else if (screen === 'cantina') renderCantina();
+  else if (screen === 'stats') renderStats();
   else if (screen === 'stock') renderStock();
   requestAnimationFrame(frame);
 }
