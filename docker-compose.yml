@@ -1,0 +1,10 @@
+services:
+  voidcrude:
+    image: ghcr.io/thegreatmate/voidcrude:latest
+    build: .
+    container_name: voidcrude
+    environment:
+      - NGINX_PORT=80
+    ports:
+      - "8088:80"
+    restart: unless-stopped

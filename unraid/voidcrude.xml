@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>voidcrude</Name>
+  <Repository>ghcr.io/thegreatmate/voidcrude:latest</Repository>
+  <Registry>https://github.com/TheGreatMate/voidcrude/pkgs/container/voidcrude</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/TheGreatMate/voidcrude/issues</Support>
+  <Project>https://github.com/TheGreatMate/voidcrude</Project>
+  <Overview>VOIDCRUDE - a retro pixel-art asteroid drilling tycoon inspired by Turmoil. Scan for glowing voidcrude, steer drill pipes, haul crude to refineries and outmaneuver rival corporations. Pick a tycoon, unlock tech, and earn Legacy across runs. Played in your browser - progress is saved in each browser's local storage, so no appdata is needed.</Overview>
+  <Category>GameServers: Other:</Category>
+  <WebUI>http://[IP]:[PORT:80]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/TheGreatMate/voidcrude/main/unraid/voidcrude.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/TheGreatMate/voidcrude/main/unraid/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="80" Default="8088" Mode="tcp" Description="Port on your Unraid server used to open the game in a browser (http://SERVER-IP:PORT). Pick any free port." Type="Port" Display="always" Required="true" Mask="false">8088</Config>
+  <Config Name="Container Port" Target="NGINX_PORT" Default="80" Mode="" Description="Port the web server listens on inside the container. Leave at 80 for normal Bridge networking. Only change it when using Host or a custom (br0) network, where this becomes the port you browse to." Type="Variable" Display="advanced" Required="false" Mask="false">80</Config>
+</Container>

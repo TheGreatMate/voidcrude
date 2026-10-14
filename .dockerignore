@@ -1,0 +1,6 @@
+README.md
+*.tar
+.git
+.github
+unraid
+docker-compose.yml
