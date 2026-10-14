@@ -1860,6 +1860,47 @@ function daily() {
   if (d === S.days - 10) { msg('10 DAYS LEFT IN THIS SECTOR', P.yellow); sfx('alert'); }
   if (d >= S.days) endSector();
 }
+function daysLeft() { return Math.max(0, S.days - Math.floor(S.day)); }
+function myCrudeLeft() {
+  const seen = new Set();
+  let n = 0;
+  for (const r of myRigs()) for (const id of netPockets(r)) if (!seen.has(id)) { seen.add(id); n += S.pockets[id].amt; }
+  return n;
+}
+function allDry() { return myRigs().some(r => netPockets(r).size) && myCrudeLeft() <= 0.5; }
+function finishEarly() {
+  const left = daysLeft();
+  // fast-forward rival pumping over the skipped days so ending early can't starve them
+  for (let d = 0; d < left; d++) for (const r of S.rigs) {
+    if (!isRival(r.owner) || r.offline > d) continue;
+    const live = [...r.pockets].map(id => S.pockets[id]).filter(p => p.amt > 0);
+    if (!live.length) continue;
+    const each = st.rivalPump() * S.dayLen / live.length;
+    for (const p of live) { const g = Math.min(each, p.amt); p.amt -= g; if (S.rv[r.owner]) S.rv[r.owner].pumped += g; }
+  }
+  const bonus = Math.floor(left / 10);
+  if (bonus) { G.rd += bonus; S.stats.rd += bonus; }
+  S.early = { days: left, bonus };
+  S.confirmEnd = false; S.paused = false;
+  endSector();
+}
+function drawEndConfirm() {
+  rect(0, 0, W, H, 'rgba(5,5,15,0.75)');
+  const w = 280, h = 112, x = (W - w) / 2, y = 116;
+  panel(x, y, w, h, P.navy, P.yellow);
+  txtS('END SECTOR EARLY?', W / 2, y + 8, P.yellow, 2, 'c');
+  const stock = myRigs().reduce((a, r) => a + r.tank, 0) + S.silos.reduce((a, s2) => a + s2.tank, 0) + S.haulers.reduce((a, h2) => a + h2.cargo, 0);
+  const lines = [daysLeft() + ' DAYS LEFT - RIVALS STILL PUMP THROUGH THEM',
+    stock > 1 ? fmt(stock) + 'U STILL IN TANKS SELLS AT 40%' : 'YOUR TANKS ARE EMPTY',
+    'BONUS: +' + Math.floor(daysLeft() / 10) + ' RD (1 PER 10 DAYS SAVED)'];
+  lines.forEach((l, i) => txt(l, W / 2, y + 30 + i * 10, i === 2 ? P.cyan : P.lgray, 1, 'c'));
+  button(x + 16, y + h - 28, 120, 16, 'END SECTOR [ENTER]', finishEarly, { color: P.green, hc: P.lime, tc: P.navy });
+  button(x + w - 136, y + h - 28, 120, 16, 'KEEP PLAYING [ESC]', () => { S.confirmEnd = false; }, { color: P.dgray });
+}
+function drawDryPrompt() {
+  if (S.confirmEnd || S.auction || S.day < 5 || !allDry()) return;
+  button(W / 2 - 95, 66, 190, 13, 'YOUR POCKETS ARE DRY - END SECTOR EARLY >>', () => { S.confirmEnd = true; }, { color: P.green, hc: P.lime, tc: P.navy });
+}
 function endSector() {
   let crude = 0;
   for (const r of myRigs()) crude += r.tank;
@@ -1885,7 +1926,7 @@ function endSector() {
   if (G.credits < START_FLOOR) { stipend = Math.round(START_FLOOR - Math.max(0, G.credits)); G.credits = START_FLOOR; }
   G.report = { sector: G.sector, name: S.name, revenue: S.stats.revenue, spent: S.stats.spent, sold: S.stats.sold, gas: S.stats.gas,
     fire, crude, rivals: rivalRep, stipend, interest,
-    rd: S.stats.rd, rank: S.rank, jobs: S.stats.jobs, rdBonus };
+    rd: S.stats.rd, rank: S.rank, jobs: S.stats.jobs, rdBonus, early: S.early || null };
   G.sector++;
   save();
   screen = 'summary';
@@ -2751,13 +2792,14 @@ function drawCards() {
 }
 function drawPauseMenu() {
   rect(0, 0, W, H, 'rgba(5,5,15,0.72)');
-  const w = 180, h = 112, x = (W - w) / 2, y = 110;
+  const w = 180, h = 130, x = (W - w) / 2, y = 104;
   panel(x, y, w, h, P.navy, P.crude);
   txtS('PAUSED', W / 2, y + 8, P.crudeL, 2, 'c');
   button(x + 20, y + 28, w - 40, 14, 'RESUME', togglePause);
   button(x + 20, y + 46, w - 40, 14, 'HOW TO PLAY', () => { S.help = true; S.paused = false; });
   button(x + 20, y + 64, w - 40, 14, 'CRT EFFECT: ' + (crt.classList.contains('off') ? 'OFF' : 'ON'), toggleCrt);
-  button(x + 20, y + 86, w - 40, 14, 'QUIT TO TITLE (LOSE SECTOR)', () => { screen = 'title'; S = null; }, { color: P.red, hc: P.orange });
+  button(x + 20, y + 82, w - 40, 14, 'END SECTOR EARLY', () => { S.paused = false; S.confirmEnd = true; }, { color: P.green, hc: P.lime, tc: P.navy });
+  button(x + 20, y + 104, w - 40, 14, 'QUIT TO TITLE (LOSE SECTOR)', () => { screen = 'title'; S = null; }, { color: P.red, hc: P.orange });
 }
 function drawHelpPanel(onClose) {
   rect(0, 0, W, H, 'rgba(5,5,15,0.82)');
@@ -2807,6 +2849,7 @@ function renderPlay() {
   drawTopBar();
   drawMessages();
   drawHint();
+  drawDryPrompt();
   drawPlotButtons();
   drawBottomBar();
   drawPerkChips();
@@ -2817,6 +2860,7 @@ function renderPlay() {
   if (S.bm) drawBlackMarket();
   if (S.auction) drawAuction();
   if (S.choice) drawCards();
+  if (S.confirmEnd) drawEndConfirm();
   if (S.paused) drawPauseMenu();
   if (S.help) drawHelpPanel(() => { S.help = false; });
 }
@@ -2920,6 +2964,7 @@ function renderSummary() {
   row('EXPENSES', '-$' + fmt(r.spent), y, P.red); y += 11;
   rect(200, y, 240, 1, P.gray); y += 5;
   row('NET PROFIT', (profit < 0 ? '-$' : '$') + fmt(Math.abs(profit)), y, profit >= 0 ? P.lime : P.red); y += 16;
+  if (r.early) { row('FINISHED EARLY (' + r.early.days + ' DAYS SAVED)', '+' + r.early.bonus + ' RD', y, P.lime); y += 11; }
   row('PEAK RANK', '' + (r.rank || 0), y, P.yellow); y += 11;
   row('CONTRACTS COMPLETED', '' + (r.jobs || 0), y, P.lime); y += 11;
   row('RESEARCH EARNED (INCL +' + (r.rdBonus || 0) + ' BONUS)', (r.rd || 0) + ' RD', y, P.cyan); y += 16;
@@ -3276,14 +3321,14 @@ function pipeGrab(x, y) {
   return best;
 }
 function playDown(p) {
-  if (S.paused || S.help || S.choice || S.bm || S.auction || S.tool) return;
+  if (S.paused || S.help || S.choice || S.bm || S.auction || S.confirmEnd || S.tool) return;
   S.drag = null;
   const r = rigAt(p.x, p.y);
   if (r && r.owner === 'you') { S.drag = { kind: 'pipe', rig: r, start: jointsOf(r)[0] }; return; }
   if (p.y > UG_TOP) { const g = pipeGrab(p.x, p.y); if (g) S.drag = { kind: 'pipe', rig: g.rig, start: g.start }; }
 }
 function playUp(p) {
-  if (S.paused || S.help || S.choice || S.bm || S.auction) return;
+  if (S.paused || S.help || S.choice || S.bm || S.auction || S.confirmEnd) return;
   if (S.tool === 'glitch') { releaseGlitch(p.x, p.y); return; }
   if (S.tool === 'blast') { if (p.y < 341) blast(p.x, p.y); return; }
   if (S.tool) { if (p.y > 13 && p.y < 341) placeAt(S.tool, Math.round(p.x / 4) * 4); return; }
@@ -3345,6 +3390,7 @@ addEventListener('keydown', e => {
   if (screen !== 'play' || !S) return;
   const k = e.key.toLowerCase();
   if (S.choice) { const i = '123'.indexOf(k); if (i >= 0 && S.choice[i]) pickPerk(i); return; }
+  if (S.confirmEnd) { if (k === 'enter') finishEarly(); else if (k === 'escape') S.confirmEnd = false; return; }
   if (S.auction && !S.paused) { if (k === 'b') auctionBid('you'); else if (k === 'escape') auctionPass(); return; }
   if (S.bm && k !== 'escape' && k !== '6') return;
   if (k === ' ' || k === 'p') { togglePause(); e.preventDefault(); return; }
@@ -3378,7 +3424,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now; GT += dt;
   if (screen === 'play' && S && S.auction && !S.paused && !S.help) updateAuction(dt);
-  if (screen === 'play' && S && !S.paused && !S.help && !S.choice && !S.bm && !S.auction) {
+  if (screen === 'play' && S && !S.paused && !S.help && !S.choice && !S.bm && !S.auction && !S.confirmEnd) {
     acc += dt * S.speed;
     let n = 0;
     while (acc >= STEP && n < 24) { update(STEP); acc -= STEP; n++; if (screen !== 'play') break; }

@@ -21,6 +21,10 @@ A retro pixel-art space tycoon inspired by *Turmoil*. Buy asteroid plots, scan f
 
 It's pure HTML5 canvas with no dependencies, served by nginx. Saves are stored in the browser's localStorage after each sector.
 
+## Finishing early
+
+Out of crude? End the sector early from the pause menu, or click the prompt that appears once every pocket your rigs tap is dry. Rivals still pump through the skipped days, leftover crude sells at 40%, and you earn +1 RD per 10 days saved.
+
 ## Money
 
 Every sector starts with at least $2,000. Short on cash? Borrow in $1,000 steps from the shop or the black market (20% interest per sector, repay in the shop).
@@ -93,7 +97,7 @@ docker run -d --name voidcrude -p 8088:80 voidcrude:latest
 | Click a refinery, or ► on its price panel | Move one of your haulers to that side |
 | ◄ on a refinery's price panel | Move one of its haulers to the other side |
 | Click a hauler, then a refinery | Switch that hauler's side |
-| `Space` | Pause menu |
+| `Space` | Pause menu (includes **End Sector Early**) |
 | `1X` `2X` `4X` (top bar) or `F` | Game speed |
 | `Tab` | Cycle haulers |
 | `Esc` / right-click | Cancel |
