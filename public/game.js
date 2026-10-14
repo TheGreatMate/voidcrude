@@ -38,39 +38,39 @@ const BRANCHES = [
   { name: 'LOGISTICS', col: '#73eff7' }, { name: 'MARKETS', col: '#ffcd75' },
 ];
 const TECH = [
-  { id: 'bit1', b: 0, row: 0, name: 'PLASMA BIT', cost: 10, req: [], desc: '+35% DRILL SPEED' },
-  { id: 'pipe1', b: 0, row: 1, name: 'NANOPIPE', cost: 20, req: ['bit1'], desc: '-30% PIPE COST' },
-  { id: 'bit2', b: 0, row: 2, name: 'PLASMA BIT II', cost: 25, req: ['bit1'], desc: 'ANOTHER +35% DRILL SPEED' },
-  { id: 'coupler', b: 0, row: 3, name: 'PIPE COUPLERS', cost: 35, req: ['pipe1'], desc: "DRILL INTO ANOTHER RIG'S PIPE TO JOIN THEM - THEY SHARE POCKETS" },
-  { id: 'gas', b: 0, row: 4, name: 'GAS SIPHON', cost: 40, req: ['pipe1'], desc: 'GAS POCKETS PAY OUT INSTEAD OF BLOWING UP' },
-  { id: 'laser1', b: 0, row: 5, name: 'LASER BORE', cost: 45, req: ['bit2'], desc: 'DRILL THROUGH ROCK AT 30% SPEED' },
-  { id: 'laser2', b: 0, row: 6, name: 'LASER BORE II', cost: 80, req: ['laser1'], desc: 'DRILL THROUGH ROCK AT 75% SPEED' },
-  { id: 'seismic', b: 0, row: 7, name: 'SEISMIC BIT', cost: 120, req: ['laser2', 'gas'], cap: true, desc: 'DRILLS REVEAL A WIDE AREA AROUND THEM AND RUN +50% FASTER' },
-  { id: 'pump1', b: 1, row: 0, name: 'HYPER PUMPS', cost: 10, req: [], desc: '+30% PUMP RATE' },
-  { id: 'tank1', b: 1, row: 1, name: 'RIG TANKS', cost: 20, req: ['pump1'], desc: '+25 RIG STORAGE' },
-  { id: 'pump2', b: 1, row: 2, name: 'HYPER PUMPS II', cost: 25, req: ['pump1'], desc: 'ANOTHER +30% PUMP RATE' },
-  { id: 'silo1', b: 1, row: 3, name: 'SILO NETWORK', cost: 35, req: ['tank1'], desc: '+100 SILO STORAGE AND DOUBLE SILO PIPE REACH' },
-  { id: 'inject', b: 1, row: 4, name: 'PRESSURE INJECT', cost: 50, req: ['pump2'], desc: 'EVERY POCKET YIELDS +25% MORE CRUDE' },
-  { id: 'core', b: 1, row: 5, name: 'DEEP CORE TAP', cost: 90, req: ['inject'], desc: 'POCKETS YIELD ANOTHER +25% MORE CRUDE' },
-  { id: 'reson', b: 1, row: 6, name: 'VOID RESONATOR', cost: 120, req: ['core', 'silo1'], cap: true, desc: 'POCKETS YOU TAP SLOWLY REGENERATE CRUDE - EVEN DRY ONES' },
-  { id: 'ion1', b: 2, row: 0, name: 'ION ENGINES', cost: 10, req: [], desc: '+20% HAULER SPEED' },
-  { id: 'cargo1', b: 2, row: 1, name: 'CARGO PODS', cost: 20, req: ['ion1'], desc: '+10 HAULER CAPACITY' },
-  { id: 'ion2', b: 2, row: 2, name: 'ION ENGINES II', cost: 25, req: ['ion1'], desc: 'ANOTHER +20% HAULER SPEED' },
-  { id: 'auto', b: 2, row: 3, name: 'SMART ROUTING', cost: 45, req: ['cargo1'], desc: 'HAULERS DIVERT TO THE OTHER STATION WHEN IT PAYS 10%+ MORE' },
-  { id: 'cargo2', b: 2, row: 4, name: 'CARGO PODS II', cost: 40, req: ['cargo1'], desc: 'ANOTHER +10 HAULER CAPACITY' },
-  { id: 'fleet', b: 2, row: 5, name: 'FLEET CHARTER', cost: 70, req: ['auto'], desc: 'START EVERY SECTOR WITH 2 FREE HAULERS' },
-  { id: 'warp', b: 2, row: 6, name: 'WARP HAULERS', cost: 120, req: ['fleet', 'ion2'], cap: true, desc: 'HAULERS FLY, LOAD AND UNLOAD TWICE AS FAST' },
-  { id: 'intel', b: 3, row: 0, name: 'MARKET INTEL', cost: 10, req: [], desc: '10-DAY PRICE FORECAST ON STATION PANELS' },
-  { id: 'survey', b: 3, row: 1, name: 'LAND SURVEYOR', cost: 20, req: ['intel'], desc: 'PLOTS 20% CHEAPER AND SIGNS RATE THEIR CRUDE' },
-  { id: 'broker1', b: 3, row: 2, name: 'BROKER', cost: 25, req: ['intel'], desc: '+8% SELL PRICE EVERYWHERE' },
-  { id: 'scan1', b: 3, row: 3, name: 'SCANNER ARRAY', cost: 30, req: ['survey'], desc: '+30% SCAN RANGE AND SCANS COST HALF' },
-  { id: 'negot', b: 3, row: 4, name: 'NEGOTIATOR', cost: 40, req: ['broker1'], desc: 'CONTRACT REWARDS +50%' },
-  { id: 'broker2', b: 3, row: 5, name: 'BROKER II', cost: 70, req: ['negot'], desc: 'ANOTHER +8% SELL PRICE' },
-  { id: 'maker', b: 3, row: 6, name: 'MARKET MAKER', cost: 120, req: ['broker2', 'scan1'], cap: true, desc: 'YOUR SALES BARELY DENT STATION PRICES' },
+  { id: 'bit1', b: 0, row: 0, name: 'PLASMA BIT', cost: 15, req: [], desc: '+35% DRILL SPEED' },
+  { id: 'pipe1', b: 0, row: 1, name: 'NANOPIPE', cost: 30, req: ['bit1'], desc: '-30% PIPE COST' },
+  { id: 'bit2', b: 0, row: 2, name: 'PLASMA BIT II', cost: 40, req: ['bit1'], desc: 'ANOTHER +35% DRILL SPEED' },
+  { id: 'coupler', b: 0, row: 3, name: 'PIPE COUPLERS', cost: 55, req: ['pipe1'], desc: "DRILL INTO ANOTHER RIG'S PIPE TO JOIN THEM - THEY SHARE POCKETS" },
+  { id: 'gas', b: 0, row: 4, name: 'GAS SIPHON', cost: 60, req: ['pipe1'], desc: 'GAS POCKETS PAY OUT INSTEAD OF BLOWING UP' },
+  { id: 'laser1', b: 0, row: 5, name: 'LASER BORE', cost: 70, req: ['bit2'], desc: 'DRILL THROUGH ROCK AT 30% SPEED' },
+  { id: 'laser2', b: 0, row: 6, name: 'LASER BORE II', cost: 120, req: ['laser1'], desc: 'DRILL THROUGH ROCK AT 75% SPEED' },
+  { id: 'seismic', b: 0, row: 7, name: 'SEISMIC BIT', cost: 180, req: ['laser2', 'gas'], cap: true, desc: 'DRILLS REVEAL A WIDE AREA AROUND THEM AND RUN +50% FASTER' },
+  { id: 'pump1', b: 1, row: 0, name: 'HYPER PUMPS', cost: 15, req: [], desc: '+30% PUMP RATE' },
+  { id: 'tank1', b: 1, row: 1, name: 'RIG TANKS', cost: 30, req: ['pump1'], desc: '+25 RIG STORAGE' },
+  { id: 'pump2', b: 1, row: 2, name: 'HYPER PUMPS II', cost: 40, req: ['pump1'], desc: 'ANOTHER +30% PUMP RATE' },
+  { id: 'silo1', b: 1, row: 3, name: 'SILO NETWORK', cost: 55, req: ['tank1'], desc: '+100 SILO STORAGE AND DOUBLE SILO PIPE REACH' },
+  { id: 'inject', b: 1, row: 4, name: 'PRESSURE INJECT', cost: 75, req: ['pump2'], desc: 'EVERY POCKET YIELDS +25% MORE CRUDE' },
+  { id: 'core', b: 1, row: 5, name: 'DEEP CORE TAP', cost: 135, req: ['inject'], desc: 'POCKETS YIELD ANOTHER +25% MORE CRUDE' },
+  { id: 'reson', b: 1, row: 6, name: 'VOID RESONATOR', cost: 180, req: ['core', 'silo1'], cap: true, desc: 'POCKETS YOU TAP SLOWLY REGENERATE CRUDE - EVEN DRY ONES' },
+  { id: 'ion1', b: 2, row: 0, name: 'ION ENGINES', cost: 15, req: [], desc: '+20% HAULER SPEED' },
+  { id: 'cargo1', b: 2, row: 1, name: 'CARGO PODS', cost: 30, req: ['ion1'], desc: '+10 HAULER CAPACITY' },
+  { id: 'ion2', b: 2, row: 2, name: 'ION ENGINES II', cost: 40, req: ['ion1'], desc: 'ANOTHER +20% HAULER SPEED' },
+  { id: 'auto', b: 2, row: 3, name: 'SMART ROUTING', cost: 70, req: ['cargo1'], desc: 'HAULERS DIVERT TO THE OTHER STATION WHEN IT PAYS 10%+ MORE' },
+  { id: 'cargo2', b: 2, row: 4, name: 'CARGO PODS II', cost: 60, req: ['cargo1'], desc: 'ANOTHER +10 HAULER CAPACITY' },
+  { id: 'fleet', b: 2, row: 5, name: 'FLEET CHARTER', cost: 105, req: ['auto'], desc: 'START EVERY SECTOR WITH 2 FREE HAULERS' },
+  { id: 'warp', b: 2, row: 6, name: 'WARP HAULERS', cost: 180, req: ['fleet', 'ion2'], cap: true, desc: 'HAULERS FLY, LOAD AND UNLOAD TWICE AS FAST' },
+  { id: 'intel', b: 3, row: 0, name: 'MARKET INTEL', cost: 15, req: [], desc: '10-DAY PRICE FORECAST ON STATION PANELS' },
+  { id: 'survey', b: 3, row: 1, name: 'LAND SURVEYOR', cost: 30, req: ['intel'], desc: 'PLOTS 20% CHEAPER AND SIGNS RATE THEIR CRUDE' },
+  { id: 'broker1', b: 3, row: 2, name: 'BROKER', cost: 40, req: ['intel'], desc: '+8% SELL PRICE EVERYWHERE' },
+  { id: 'scan1', b: 3, row: 3, name: 'SCANNER ARRAY', cost: 45, req: ['survey'], desc: '+30% SCAN RANGE AND SCANS COST HALF' },
+  { id: 'negot', b: 3, row: 4, name: 'NEGOTIATOR', cost: 60, req: ['broker1'], desc: 'CONTRACT REWARDS +50%' },
+  { id: 'broker2', b: 3, row: 5, name: 'BROKER II', cost: 105, req: ['negot'], desc: 'ANOTHER +8% SELL PRICE' },
+  { id: 'maker', b: 3, row: 6, name: 'MARKET MAKER', cost: 180, req: ['broker2', 'scan1'], cap: true, desc: 'YOUR SALES BARELY DENT STATION PRICES' },
 ];
 // ---- rock blaster (separate upgrade track) ----
 const BLAST_MIN = 3, BLAST_MAX = 10;
-function blasterCost(lvl) { return 8 + (lvl - BLAST_MIN) * 4; } // cost to go from lvl -> lvl+1
+function blasterCost(lvl) { return 12 + (lvl - BLAST_MIN) * 6; } // cost to go from lvl -> lvl+1
 function blastRadius(lvl) { return lvl >= 9 ? 5 : lvl >= 6 ? 4 : 3; }
 
 // ---- per-sector perk cards (offered on rank up) ----
@@ -89,7 +89,7 @@ const PERKS = [
   { id: 'prospect', name: 'PROSPECTOR', icon: '?', r: 1, instant: true, desc: 'REVEALS THE 2 RICHEST HIDDEN POCKETS' },
   { id: 'sabotage', name: 'SABOTAGE', icon: 'X', r: 1, instant: true, desc: 'ALL RIVAL RIGS GO OFFLINE FOR 10 DAYS', ok: () => S.rigs.some(r => isRival(r.owner)) },
   { id: 'insure', name: 'INSURANCE', icon: '!', r: 1, once: true, desc: 'BLOWOUTS NO LONGER KNOCK RIGS OFFLINE' },
-  { id: 'rd', name: 'GRANT PROPOSAL', icon: 'RD', r: 1, instant: true, desc: '+12 RESEARCH DATA' },
+  { id: 'rd', name: 'GRANT PROPOSAL', icon: 'RD', r: 1, instant: true, desc: '+8 RESEARCH DATA' },
   { id: 'plot', name: 'LAND GRANT', icon: 'L', r: 2, instant: true, desc: 'CLAIM THE CHEAPEST FREE PLOT FOR NOTHING', ok: () => S.plots.some(p => !p.owner) },
   { id: 'time', name: 'OVERTIME', icon: 'T', r: 2, instant: true, desc: '+10 DAYS ON THE SECTOR CLOCK' },
   { id: 'jackpot', name: 'MOTHERLODE', icon: '!!', r: 2, instant: true, desc: 'A HUGE NEW POCKET FORMS UNDER YOUR LAND', ok: () => S.plots.some(p => p.owner === 'you') },
@@ -707,7 +707,7 @@ function applyPerk(p) {
     case 'blast': S.blasts += 2; break;
     case 'cash': { const v = 800 + 300 * S.d; G.credits += v; msg('INVESTOR WIRED +$' + fmt(v), P.yellow); break; }
     case 'hauler': spawnHauler(); msg('A FREE HAULER JOINS THE FLEET', P.lime); break;
-    case 'rd': gainRD(12); break;
+    case 'rd': gainRD(8); break;
     case 'time': S.days += 10; msg('OVERTIME APPROVED: +10 DAYS', P.lime); break;
     case 'sabotage': for (const r of S.rigs) if (isRival(r.owner)) r.offline = Math.max(r.offline, 10); msg('ALL RIVAL RIGS SABOTAGED!', P.lime); break;
     case 'prospect': {
@@ -812,7 +812,7 @@ function repay(all) {
   sfx('buy');
   if (screen === 'shop') save();
 }
-function sharePrice() { return Math.round(650 * Math.pow(1.05, G.shares + rivalTotal()) / 10) * 10; }
+function sharePrice() { return Math.round(900 * Math.pow(1.055, G.shares + rivalTotal()) / 10) * 10; }
 
 // ---------------------------------------------------------------- sector generation
 function blob(cx, cy, rx, ry, rng) {
@@ -855,7 +855,7 @@ function postJob(s) {
   const units = Math.round((60 + Math.random() * 90) * (1 + 0.2 * S.d) / 10) * 10;
   const boost = st.jobMul();
   s.job = { units, done: 0, deadline: Math.floor(S.day) + 18 + Math.floor(Math.random() * 12),
-    cred: Math.round(units * s.base * 0.5 * boost / 10) * 10, rd: Math.round((5 + units / 25) * boost) };
+    cred: Math.round(units * s.base * 0.5 * boost / 10) * 10, rd: Math.round((2 + units / 60) * boost) };
   msg(s.name + ' POSTED A CONTRACT: ' + units + 'U IN ' + (s.job.deadline - Math.floor(S.day)) + ' DAYS', P.cyan);
   sfx('alert');
 }
@@ -1332,7 +1332,7 @@ function connect(r, p) {
       sfx('strike');
       if (!p.mineTapped) {
         p.mineTapped = true;
-        gainRD(3, p.cx, p.cy - 2);
+        gainRD(2, p.cx, p.cy - 2);
         unlock('strike');
         if (p.top >= ROWS - 16) unlock('deep');
         gainXP(15);
@@ -1513,7 +1513,7 @@ function spawnHauler(side) {
 function soldUnits(u, s) {
   jobDeliver(s, u);
   S.rdAcc += u;
-  while (S.rdAcc >= 25) { S.rdAcc -= 25; gainRD(1); }
+  while (S.rdAcc >= 80) { S.rdAcc -= 80; gainRD(1); }
   if (S.stats.sold >= 500) unlock('gusher');
   if (S.stats.sold >= 1500) unlock('kingpin');
   if (G.totalEarned >= 100000) unlock('rich');
@@ -1878,7 +1878,7 @@ function finishEarly() {
     const each = st.rivalPump() * S.dayLen / live.length;
     for (const p of live) { const g = Math.min(each, p.amt); p.amt -= g; if (S.rv[r.owner]) S.rv[r.owner].pumped += g; }
   }
-  const bonus = Math.floor(left / 10);
+  const bonus = Math.floor(left / 20);
   if (bonus) { G.rd += bonus; S.stats.rd += bonus; }
   S.early = { days: left, bonus };
   S.confirmEnd = false; S.paused = false;
@@ -1892,14 +1892,10 @@ function drawEndConfirm() {
   const stock = myRigs().reduce((a, r) => a + r.tank, 0) + S.silos.reduce((a, s2) => a + s2.tank, 0) + S.haulers.reduce((a, h2) => a + h2.cargo, 0);
   const lines = [daysLeft() + ' DAYS LEFT - RIVALS STILL PUMP THROUGH THEM',
     stock > 1 ? fmt(stock) + 'U STILL IN TANKS SELLS AT 40%' : 'YOUR TANKS ARE EMPTY',
-    'BONUS: +' + Math.floor(daysLeft() / 10) + ' RD (1 PER 10 DAYS SAVED)'];
+    'BONUS: +' + Math.floor(daysLeft() / 20) + ' RD (1 PER 20 DAYS SAVED)'];
   lines.forEach((l, i) => txt(l, W / 2, y + 30 + i * 10, i === 2 ? P.cyan : P.lgray, 1, 'c'));
   button(x + 16, y + h - 28, 120, 16, 'END SECTOR [ENTER]', finishEarly, { color: P.green, hc: P.lime, tc: P.navy });
   button(x + w - 136, y + h - 28, 120, 16, 'KEEP PLAYING [ESC]', () => { S.confirmEnd = false; }, { color: P.dgray });
-}
-function drawDryPrompt() {
-  if (S.confirmEnd || S.auction || S.day < 5 || !allDry()) return;
-  button(W / 2 - 95, 66, 190, 13, 'YOUR POCKETS ARE DRY - END SECTOR EARLY >>', () => { S.confirmEnd = true; }, { color: P.green, hc: P.lime, tc: P.navy });
 }
 function endSector() {
   let crude = 0;
@@ -1913,12 +1909,12 @@ function endSector() {
   const rivalRep = [];
   for (const id of RIVAL_IDS) {
     const active = S.rivals.includes(id), pumped = active ? S.rv[id].pumped : 0;
-    let rcash = (active ? pumped * avgBase * 0.45 + 300 * G.sector : 150 * G.sector) * (1 - 0.08 * lv('hard'));
+    let rcash = (active ? pumped * avgBase * 0.55 + 400 * G.sector : 200 * G.sector) * (1 - 0.08 * lv('hard'));
     let bought = 0;
     while (G.rshares[id] < 51 && G.shares + rivalTotal() < 100 && rcash >= sharePrice()) { rcash -= sharePrice(); G.rshares[id]++; bought++; }
     rivalRep.push({ id, active, pumped, bought });
   }
-  const rdBonus = 5 + G.sector;
+  const rdBonus = 2 + Math.floor(G.sector / 2);
   G.rd += rdBonus; S.stats.rd += rdBonus;
   const interest = Math.round(G.debt * LOAN_RATE);
   G.debt += interest;
@@ -2558,8 +2554,12 @@ function drawTopBar() {
   txt('RANK ' + S.rank, 104, 4, P.yellow);
   meter(136, 3.5, 50, 6, (S.xp - lo) / (hi - lo), P.yellow);
   const day = Math.min(S.days, Math.floor(S.day) + 1);
-  txt('DAY ' + day + '/' + S.days, 254, 4, P.white, 1, 'r');
-  meter(258, 3.5, 100, 6, S.day / S.days, S.days - S.day < 10 ? P.orange : P.green);
+  if (S.day >= 5 && !S.confirmEnd && allDry())
+    button(192, 1.5, 167, 10, 'POCKETS DRY - END SECTOR EARLY >>', () => { S.confirmEnd = true; }, { color: blink() ? P.green : '#257a3c', hc: P.lime, tc: P.navy });
+  else {
+    txt('DAY ' + day + '/' + S.days, 254, 4, P.white, 1, 'r');
+    meter(258, 3.5, 100, 6, S.day / S.days, S.days - S.day < 10 ? P.orange : P.green);
+  }
   [1, 2, 4].forEach((v, i) => button(362 + i * 17, 2, 16, 9, v + 'X', () => { S.speed = v; sfx('click'); }, { active: S.speed === v, color: P.dblue, hc: P.blue }));
   if (S.flare > 0) txt('FLARE', 415, 4, P.orange);
   txt(G.rd + ' RD', 470, 4, P.cyan, 1, 'r');
@@ -2849,7 +2849,6 @@ function renderPlay() {
   drawTopBar();
   drawMessages();
   drawHint();
-  drawDryPrompt();
   drawPlotButtons();
   drawBottomBar();
   drawPerkChips();
@@ -3064,7 +3063,7 @@ function drawTechTree() {
     const req = t.req.length ? 'REQUIRES: ' + t.req.map(id => TECH.find(x => x.id === id).name).join(' + ') : 'NO REQUIREMENTS';
     txt(s === 'owned' ? 'RESEARCHED' : req + '   COST ' + t.cost + ' RD' + (s === 'ready' ? ' - CLICK TO RESEARCH' : ''), 17, dy + 19, s === 'owned' ? P.lime : s === 'locked' ? P.red : P.cyan);
   } else {
-    txt('EARN RESEARCH DATA (RD) BY STRIKING CRUDE, SELLING (1 PER 25U),', 17, dy + 5, P.lgray);
+    txt('EARN RESEARCH DATA (RD) BY STRIKING CRUDE, SELLING (1 PER 80U),', 17, dy + 5, P.lgray);
     txt('COMPLETING CONTRACTS, FINISHING SECTORS AND ACHIEVEMENTS.', 17, dy + 14, P.lgray);
   }
 }
@@ -3108,7 +3107,7 @@ function renderShop() {
   for (const id of RIVAL_IDS) { txt(RIVALS[id].name, 430, y, rcol(id)); txt(G.rshares[id] + ' SHARES', 620, y, rcol(id), 1, 'r'); y += 9; }
   txt('UNOWNED', 430, y, P.lgray); txt((100 - G.shares - rivalTotal()) + ' SHARES', 620, y, P.lgray, 1, 'r'); y += 12;
   txt('PRICE PER SHARE', 430, y, P.white); txt('$' + fmt(sharePrice()), 620, y, P.yellow, 1, 'r'); y += 9;
-  txt('PRICE RISES 5% PER SHARE SOLD', 430, y, P.gray); y += 14;
+  txt('PRICE RISES 5.5% PER SHARE SOLD', 430, y, P.gray); y += 14;
   const can = G.credits >= sharePrice();
   button(430, y, 60, 15, 'BUY 1', () => buyShares(1), { disabled: !can }); button(494, y, 60, 15, 'BUY 5', () => buyShares(5), { disabled: !can }); button(558, y, 64, 15, 'BUY MAX', () => buyShares(100), { disabled: !can });
   y += 22;

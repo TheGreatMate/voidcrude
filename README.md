@@ -23,7 +23,7 @@ It's pure HTML5 canvas with no dependencies, served by nginx. Saves are stored i
 
 ## Finishing early
 
-Out of crude? End the sector early from the pause menu, or click the prompt that appears once every pocket your rigs tap is dry. Rivals still pump through the skipped days, leftover crude sells at 40%, and you earn +1 RD per 10 days saved.
+Out of crude? End the sector early from the pause menu, or click the top-bar prompt that replaces the day counter once every pocket your rigs tap is dry. Rivals still pump through the skipped days, leftover crude sells at 40%, and you earn +1 RD per 20 days saved.
 
 ## Money
 
