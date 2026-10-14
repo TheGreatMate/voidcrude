@@ -653,7 +653,7 @@ function loadGame() {
 function unlock(id) {
   if (!G || G.ach[id]) return;
   const a = ACH.find(a => a.id === id);
-  const cash = a.rd * 150;
+  const cash = a.rd * 50;
   G.ach[id] = true; G.credits += cash;
   if (S && screen === 'play') msg('ACHIEVEMENT: ' + a.name + '  +$' + fmt(cash), P.yellow);
   sfx('fanfare');
@@ -2159,7 +2159,9 @@ const DIFFS = {
 };
 function DF() { return DIFFS[(G && G.diff) || 'normal']; }
 function beltOf(sector) { return clamp(Math.floor((sector - 1) / SECTORS_PER_BELT) + 1, 1, BELTS.length); }
-function techCost(t) { return Math.round(t.cost * 100 * (1 - 0.05 * lv('rd')) / 50) * 50; }
+// every upgrade you own makes the rest 4% pricier, so each purchase is a real choice
+function techOwned() { return TECH.filter(t => has(t.id)).length; }
+function techCost(t) { return Math.round(t.cost * 200 * (1 + 0.04 * techOwned()) * (1 - 0.05 * lv('rd')) / 50) * 50; }
 
 function genMap() {
   const rng = mulberry32((G.seed * 13 + 7) >>> 0);
@@ -2737,7 +2739,7 @@ const RELICS = [
   { id: 'cell', name: 'ZERO-POINT CELL', keep: '+3 ROCK BLASTER CHARGES', col: '#f4f4f4' },
   { id: 'totem', name: 'DREAD TOTEM', keep: 'RIVAL RIGS PUMP 25% SLOWER THIS SECTOR', col: '#ff5ca8' },
 ];
-function relicValue(belt, rng) { return Math.round((500 + 250 * belt) * (0.8 + rng() * 0.6) / 10) * 10; }
+function relicValue(belt, rng) { return Math.round((300 + 150 * belt) * (0.8 + rng() * 0.6) / 10) * 10; }
 function placeRelics(rng) {
   S.relics = [];
   const n = 2 + (S.belt >= 3 ? 1 : 0) + (rng() < 0.5 ? 1 : 0);
@@ -4321,7 +4323,7 @@ function drawTechTree() {
     txt(s === 'owned' ? 'OWNED' : s === 'belt' ? 'UNLOCKS IN BELT ' + TECH_BELT[t.id] + ': ' + BELTS[TECH_BELT[t.id] - 1].name : req + '   COST $' + fmt(techCost(t)) + (s === 'ready' ? ' - CLICK TO BUY' : ''), 17, dy + 19, s === 'owned' ? P.lime : s === 'locked' || s === 'belt' ? P.red : P.yellow);
   } else {
     txt('UPGRADES COST THE SAME CREDITS AS SHARES - SPEND WISELY BEFORE STOCK AUCTIONS.', 17, dy + 5, P.lgray);
-    txt('NEW UPGRADES UNLOCK AS YOU REACH EACH BELT.', 17, dy + 14, P.lgray);
+    txt('NEW UPGRADES UNLOCK AS YOU REACH EACH BELT. EACH ONE YOU OWN RAISES THE REST 4%.', 17, dy + 14, P.lgray);
   }
 }
 function drawAchievements() {
@@ -4331,7 +4333,7 @@ function drawAchievements() {
     rect(x + 1, y + 1, 188, 26, got ? '#2b2a20' : '#121322');
     txt(a.name, x + 6, y + 6, got ? P.yellow : P.lgray);
     txt(a.desc, x + 6, y + 16, got ? P.white : P.gray);
-    txt('+$' + fmt(a.rd * 150), x + 184, y + 6, got ? P.lime : P.yellow, 1, 'r');
+    txt('+$' + fmt(a.rd * 50), x + 184, y + 6, got ? P.lime : P.yellow, 1, 'r');
     if (got) txt('DONE', x + 184, y + 16, P.lime, 1, 'r');
   });
 }
