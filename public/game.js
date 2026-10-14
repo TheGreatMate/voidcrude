@@ -186,6 +186,8 @@ const BLACK_MARKET = [
   { id: 'bribe', name: 'BRIBE THE REGISTRY', desc: 'RIVALS CANNOT BUY LAND FOR 25 DAYS', base: 900 },
   { id: 'rumor', name: 'PLANT A RUMOR', desc: 'A STATION PAYS +35% FOR 6 DAYS', base: 800, target: 'station' },
   { id: 'short', name: 'SHORT THEIR STOCK', desc: 'A RIVAL LOSES 2 CONSORTIUM SHARES (ONCE PER SECTOR)', base: 2500, target: 'owner' },
+  { id: 'coupler', name: 'PIPE COUPLERS', desc: "DRILL INTO ANOTHER OF YOUR RIGS' PIPES TO JOIN THEM (WHOLE RUN)", base: 2000 },
+  { id: 'loan', name: 'QUICK LOAN', desc: 'CASH NOW. 20% INTEREST PER SECTOR - REPAY IN THE SHOP', base: 0 },
 ];
 
 const HELP = [
@@ -197,8 +199,8 @@ const HELP = [
   '4. CLICK THE RIG, THEN CLICK UNDERGROUND TO DRILL A PIPE.',
   '   DRAG FROM ANY PIPE TO BRANCH IT. PIPE COSTS CREDITS PER METER.',
   '5. HIT A PURPLE POCKET AND THE RIG PUMPS IT INTO ITS TANK.',
-  '6. BUY HAULERS [3] AND PICK A SIDE: HELIX (LEFT) OR NOVA (RIGHT).',
-  '   THEY RUN THEMSELVES. CLICK A REFINERY OR USE < > ON ITS PANEL.',
+  '6. BUY HAULERS [3]. ASSIGN THEM WITH < > ON EACH REFINERY PANEL.',
+  '   THEY FETCH AND SELL CRUDE BY THEMSELVES. LOANS: BLACK MARKET/SHOP.',
   '7. SILOS [2] NEXT TO RIGS STORE THE OVERFLOW.',
   '8. ROCK IN THE WAY? ROCK BLASTER [5] CLEARS IT. LIMITED CHARGES.',
   '',
@@ -548,7 +550,9 @@ function bmCost(item) {
   return Math.round(item.base * (1 + 0.2 * S.d) * Math.pow(1.5, uses) * st.bmMul() / 10) * 10;
 }
 function bmBuy(item, target) {
+  if (item.id === 'loan') { borrow(); return; }
   if (item.id === 'short' && S.bmUses.short) { msg('ALREADY SHORTED A STOCK THIS SECTOR', P.red); sfx('err'); return; }
+  if (item.id === 'coupler' && G.couplers) { msg('YOU ALREADY OWN PIPE COUPLERS', P.lgray); sfx('err'); return; }
   const c = bmCost(item);
   if (!afford(c)) return;
   spend(c);
@@ -565,6 +569,10 @@ function bmBuy(item, target) {
     case 'bribe': S.bribe = 25; msg('THE LAND REGISTRY IS CLOSED TO RIVALS FOR 25 DAYS', P.lime); break;
     case 'rumor': target.mult = Math.max(target.mult, 1.35); target.multT = Math.max(target.multT, 6); msg('RUMORS SPREAD: ' + target.name + ' PAYS +35%', P.lime); break;
     case 'short': G.rshares[target] = Math.max(0, (G.rshares[target] || 0) - 2); msg(RIVALS[target].short + ' STOCK SHORTED: -2 SHARES', P.lime); taunt(target, 'WHO LEAKED OUR BOOKS?!'); break;
+    case 'coupler':
+      G.couplers = true;
+      msg('PIPE COUPLERS INSTALLED: DRILL ONE RIG\'S PIPE INTO ANOTHER RIG\'S PIPE TO JOIN THEM', P.lime);
+      break;
   }
   S.bm = false;
 }
@@ -627,7 +635,7 @@ function drawPortrait(L, x, y, s = 1) {
 
 function newGame(charId) {
   G = { seed: (Math.random() * 1e9) | 0, sector: 1, credits: 2000 + 750 * lv('cap'), tech: {}, rd: 8 * lv('rd'), ach: {}, blaster: BLAST_MIN,
-    life: { contracts: 0 }, shares: 0, rshares: { syn: 0, kroll: 0, hex: 0 }, totalEarned: 0, report: null, char: charId || 'rusty' };
+    life: { contracts: 0 }, shares: 0, rshares: { syn: 0, kroll: 0, hex: 0 }, totalEarned: 0, report: null, char: charId || 'rusty', debt: 0 };
   genSector({ k: 0, name: SECTOR_NAMES[0], rivals: ['syn'], mods: [], rdMul: 1 });
   screen = 'play';
 }
@@ -644,7 +652,7 @@ function loadGame() {
       delete G.upg;
     }
     if (!G.rshares) { G.rshares = { syn: G.rivalShares || 0, kroll: 0, hex: 0 }; delete G.rivalShares; }
-    G.rd = G.rd || 0; G.ach = G.ach || {}; G.life = G.life || { contracts: 0 }; G.blaster = G.blaster || BLAST_MIN; G.char = G.char || 'rusty';
+    G.rd = G.rd || 0; G.ach = G.ach || {}; G.life = G.life || { contracts: 0 }; G.blaster = G.blaster || BLAST_MIN; G.char = G.char || 'rusty'; G.debt = G.debt || 0;
     return true;
   } catch (e) { return false; }
 }
@@ -791,6 +799,23 @@ function blast(x, y) {
   if (S.blasts <= 0) S.tool = null;
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } }
+const LOAN_STEP = 1000, LOAN_RATE = 0.2, START_FLOOR = 2000;
+function loanLimit() { return 3000 + 1500 * (G.sector - 1); }
+function note(text, color) { if (S && screen === 'play') msg(text, color); }
+function borrow() {
+  if (G.debt + LOAN_STEP > loanLimit()) { note('LOAN LIMIT REACHED ($' + fmt(loanLimit()) + ')', P.red); sfx('err'); return; }
+  G.debt += LOAN_STEP; G.credits += LOAN_STEP;
+  note('BORROWED $' + fmt(LOAN_STEP) + ' - DEBT NOW $' + fmt(G.debt) + ' (20% INTEREST PER SECTOR)', P.yellow);
+  sfx('cash');
+  if (screen === 'shop') save();
+}
+function repay(all) {
+  const n = Math.min(all ? G.debt : LOAN_STEP, G.debt, Math.floor(G.credits));
+  if (n <= 0) { sfx('err'); return; }
+  G.debt -= n; G.credits -= n;
+  sfx('buy');
+  if (screen === 'shop') save();
+}
 function sharePrice() { return Math.round(650 * Math.pow(1.05, G.shares + rivalTotal()) / 10) * 10; }
 
 // ---------------------------------------------------------------- sector generation
@@ -868,7 +893,7 @@ function genSector(opt) {
     grid: new Uint8Array(N), pid: new Int16Array(N).fill(-1), rev: new Uint8Array(N),
     pockets: [], gases: [], plots: [], rigs: [], silos: [], haulers: [], scans: [], segs: [],
     parts: [], floats: [], msgs: [], sel: null, tool: null, drag: null, nid: 1,
-    stats: { revenue: 0, spent: 0, sold: 0, gas: 0, rd: 0, jobs: 0 },
+    stats: { revenue: 0, spent: 0, sold: 0, gas: 0, rd: 0, jobs: 0 }, pcell: new Int32Array(COLS * ROWS), joints: [],
     perks: {}, xp: 0, rank: 0, pending: 0, choice: null, rdAcc: 0, blasts: 0, blasted: 0,
     mods, rivals: opt.rivals, rdMul: opt.rdMul, rdFrac: 0, rv: {}, taunt: null, bm: false, bmUses: {}, bribe: 0,
     abil: { cd: 0, on: 0 }, jam: 0, nextQuake: 10 + rng() * 6,
@@ -1338,7 +1363,20 @@ function updateDrill(r, dt) {
       spend(cost);
     }
     s.prog += step; budget -= step * mul;
-    if (mine) revealAround(s.x1 + s.ux * s.prog, s.y1 + s.uy * s.prog, has('seismic') ? 4 : 1);
+    if (mine) {
+      const tx = s.x1 + s.ux * s.prog, ty = s.y1 + s.uy * s.prog;
+      revealAround(tx, ty, has('seismic') ? 4 : 1);
+      // remember which of your rigs owns the pipe in each cell; with couplers, meeting another rig's pipe joins them
+      const pc = cellIndexAt(tx, ty);
+      if (pc >= 0) {
+        const o = S.pcell[pc];
+        if (!o) S.pcell[pc] = r.id;
+        else if (o !== r.id && G.couplers) {
+          const other = S.rigs.find(x => x.id === o && x.owner === 'you');
+          if (other && !netOf(r).has(other)) { couple(r, other, tx, ty); s.len = s.prog; s.status = 'done'; break; }
+        }
+      }
+    }
   }
   if (s.status === 'drill' && s.prog >= s.len - 1e-6) s.status = 'done';
   if (s.status === 'drill' && Math.random() < 0.35) {
@@ -1374,7 +1412,7 @@ function placeAt(kind, x) {
   spend(toolCost(kind));
   if (kind === 'rig') {
     if (pk('rig') > 0) S.perks.rig--;
-    const r = { kind: 'rig', id: S.nid++, x, owner: 'you', tank: 0, pockets: new Set(), segs: [], offline: 0, dead: false };
+    const r = { kind: 'rig', id: S.nid++, x, owner: 'you', tank: 0, pockets: new Set(), segs: [], offline: 0, dead: false, links: new Set() };
     S.rigs.push(r); relink();
     S.sel = { kind: 'rig', ref: r }; S.tool = null;
     dust(x, SURF); sfx('build');
@@ -1396,15 +1434,9 @@ function buyPlot(p) {
 }
 function buyHauler() {
   if (!afford(COST.hauler)) return;
-  S.hpick = !S.hpick; S.tool = null;
-  sfx('click');
-}
-function buyHaulerSide(side) {
-  S.hpick = false;
-  if (!afford(COST.hauler)) return;
   spend(COST.hauler);
-  spawnHauler(side);
-  msg('HAULER LAUNCHED - SELLING AT ' + S.stations[side].name, P.cyan);
+  const h = spawnHauler();
+  msg('HAULER LAUNCHED - SELLING AT ' + S.stations[h.side].name + '. ASSIGN SIDES WITH < > UP TOP', P.cyan);
 }
 function spawnHauler(side) {
   if (side == null) side = S.haulers.filter(h => h.side === 0).length <= S.haulers.filter(h => h.side === 1).length ? 0 : 1;
@@ -1415,6 +1447,7 @@ function spawnHauler(side) {
   S.haulers.push(h);
   sfx('buy');
   if (S.haulers.length >= 8) unlock('fleet');
+  return h;
 }
 // every unit sold earns XP, and every 25 units earns 1 research data
 function soldUnits(u, s) {
@@ -1432,6 +1465,8 @@ function scrapRig(r) {
   S.rigs = S.rigs.filter(x => x !== r);
   for (const id of r.segs) S.segs[id].status = 'gone';
   S.pipeReset = true;
+  for (const o of r.links || []) o.links.delete(r);
+  for (let i = 0; i < S.pcell.length; i++) if (S.pcell[i] === r.id) S.pcell[i] = 0;
   G.credits += refund; S.stats.spent -= refund;
   relink();
   S.sel = null;
@@ -1441,6 +1476,25 @@ function scrapRig(r) {
 function stopDrill(r) {
   for (const id of r.segs) { const s = S.segs[id]; if (s.status === 'queued') s.status = 'gone'; else if (s.status === 'drill') { s.status = 'stop'; s.len = s.prog; } }
   sfx('click');
+}
+// rigs joined by couplers form a network; every rig in it pumps from all of the network's pockets
+function netOf(r) {
+  const seen = new Set([r]), stack = [r];
+  while (stack.length) for (const o of stack.pop().links || []) if (!o.dead && !seen.has(o)) { seen.add(o); stack.push(o); }
+  return seen;
+}
+function netPockets(r) {
+  if (!r.links || !r.links.size) return r.pockets;
+  const out = new Set();
+  for (const o of netOf(r)) for (const id of o.pockets) out.add(id);
+  return out;
+}
+function couple(a, b, x, y) {
+  (a.links ||= new Set()).add(b); (b.links ||= new Set()).add(a);
+  S.joints.push({ x, y });
+  msg('PIPES COUPLED: RIG #' + a.id + ' AND RIG #' + b.id + ' NOW SHARE THEIR POCKETS', P.crudeL);
+  float(x, y - 6, 'COUPLED!', P.crudeG);
+  sfx('strike');
 }
 function pumpAll(dt) {
   for (const r of S.rigs) {
@@ -1452,7 +1506,7 @@ function pumpAll(dt) {
     const want = Math.min((mine ? st.pump() : st.rivalPump()) * dt, space / yl);
     if (want <= 0) continue;
     const live = [];
-    for (const id of r.pockets) { const p = S.pockets[id]; if (p.amt > 0) live.push(p); }
+    for (const id of (mine ? netPockets(r) : r.pockets)) { const p = S.pockets[id]; if (p.amt > 0) live.push(p); }
     if (!live.length) continue;
     let got = 0;
     const each = want / live.length;
@@ -1528,8 +1582,8 @@ function haulerCost(h) { return ({ idle: 0, toLoad: 1, loading: 2 }[h.state] ?? 
 function sendHaulerTo(side) {
   const pool = S.haulers.filter(h => h.side !== side).sort((a, b) => haulerCost(a) - haulerCost(b));
   if (pool.length) { setSide(pool[0], side); return; }
-  if (!afford(COST.hauler)) return;
-  buyHaulerSide(side);
+  msg(S.haulers.length ? 'ALL YOUR HAULERS ALREADY SELL AT ' + S.stations[side].name : 'NO HAULERS YET - BUY ONE AT THE BOTTOM [3]', P.lgray);
+  sfx('err');
 }
 function pullHaulerFrom(side) {
   const pool = S.haulers.filter(h => h.side === side).sort((a, b) => haulerCost(a) - haulerCost(b));
@@ -1767,10 +1821,12 @@ function endSector() {
   }
   const rdBonus = 5 + G.sector;
   G.rd += rdBonus; S.stats.rd += rdBonus;
+  const interest = Math.round(G.debt * LOAN_RATE);
+  G.debt += interest;
   let stipend = 0;
-  if (G.credits < 1500) { stipend = Math.round(1500 - Math.max(0, G.credits)); G.credits = 1500; }
+  if (G.credits < START_FLOOR) { stipend = Math.round(START_FLOOR - Math.max(0, G.credits)); G.credits = START_FLOOR; }
   G.report = { sector: G.sector, name: S.name, revenue: S.stats.revenue, spent: S.stats.spent, sold: S.stats.sold, gas: S.stats.gas,
-    fire, crude, rivals: rivalRep, stipend,
+    fire, crude, rivals: rivalRep, stipend, interest,
     rd: S.stats.rd, rank: S.rank, jobs: S.stats.jobs, rdBonus };
   G.sector++;
   save();
@@ -2050,6 +2106,11 @@ function drawPipes() {
     if (s.prog > d + 0.01) { paintPipe(s, d, s.prog); s.drawn = s.prog; }
   }
   ctx.drawImage(S.pipeC, 0, SURF, W, UG_BOT - SURF);
+  for (const j of S.joints) {
+    const X = Math.round(j.x * R), Y = Math.round(j.y * R);
+    q(X - 4, Y - 4, 9, 9, '#05060c'); q(X - 3, Y - 3, 7, 7, '#c46cff'); q(X - 3, Y - 3, 7, 1, '#f3c6ff'); q(X - 1, Y - 1, 3, 3, '#5a1a85');
+    glow(j.x, j.y, 6, '#c46cff', 0.45 + 0.2 * Math.sin(GT * 3 + j.x));
+  }
   // flowing crude inside your pipes
   const off = (GT * 24) % 8;
   for (const r of S.rigs) {
@@ -2250,8 +2311,8 @@ function tutorialHint() {
   if (!mine.length) return 'BUILD A RIG [1] ON YOUR PLOT ABOVE THE CRUDE';
   if (!S.segs.some(s => s.owner === 'you')) return 'CLICK YOUR RIG, THEN CLICK UNDERGROUND TO DRILL';
   if (!mine.some(r => r.pockets.size)) return 'STEER YOUR PIPE INTO A PURPLE CRUDE POCKET';
-  if (!S.haulers.length) return 'BUY A HAULER [3] AND PICK A SIDE - IT HAULS AND SELLS BY ITSELF';
-  if (S.stats.sold === 0) return 'HAULERS RUN THEMSELVES - CLICK A REFINERY OR < > TO SEND MORE';
+  if (!S.haulers.length) return 'BUY A HAULER [3] - IT HAULS AND SELLS BY ITSELF';
+  if (S.stats.sold === 0) return 'USE < > ON THE PRICE PANELS UP TOP TO SPLIT HAULERS BETWEEN SIDES';
   return null;
 }
 function drawHint() {
@@ -2320,9 +2381,10 @@ function drawSelPanel() {
   } else if (S.sel) {
     const o = S.sel.ref;
     if (S.sel.kind === 'rig') {
-      let live = 0; for (const id of o.pockets) live += S.pockets[id].amt;
+      let live = 0; for (const id of netPockets(o)) live += S.pockets[id].amt;
+      const nl = netOf(o).size - 1;
       const state = o.offline > 0 ? 'OFFLINE ' + o.offline + ' DAYS' : o.drilling ? 'DRILLING' : o.pumping ? 'PUMPING' : o.tank >= st.rigCap() - 0.01 ? 'TANK FULL' : 'IDLE';
-      lines = ['RIG #' + o.id + ' - ' + state, 'TANK ' + fmt(o.tank) + '/' + st.rigCap() + '   CRUDE LEFT IN POCKETS ' + fmt(live) + 'U', 'CLICK UNDERGROUND TO DRILL. DRAG FROM A PIPE TO BRANCH'];
+      lines = ['RIG #' + o.id + ' - ' + state + (nl ? '   COUPLED TO ' + nl + ' RIG' + (nl > 1 ? 'S' : '') : ''), 'TANK ' + fmt(o.tank) + '/' + st.rigCap() + '   CRUDE LEFT IN POCKETS ' + fmt(live) + 'U', G.couplers ? 'DRILL INTO ANOTHER RIG\'S PIPE TO COUPLE THEM' : 'CLICK UNDERGROUND TO DRILL. DRAG FROM A PIPE TO BRANCH'];
       btns = [['STOP DRILL', () => stopDrill(o), { disabled: !activeSeg(o) }], ['SCRAP +$' + Math.round(COST.rig * 0.4), () => scrapRig(o), { color: P.red }]];
     } else if (S.sel.kind === 'hauler') {
       lines = ['HAULER - ' + haulerLabel(o), 'CARGO ' + fmt(o.cargo) + '/' + st.hCap() + '   SELLS AT ' + S.stations[o.side].name + (has('auto') ? ' (SMART)' : ''), 'FULLY AUTOMATIC. PICK ITS SIDE ON THE RIGHT'];
@@ -2354,7 +2416,7 @@ function drawTooltip() {
     const s = S.stations.find(s => (Math.abs(m.x - s.x) <= 26 && m.y > SURF - 44) || (m.y < 61 && m.x >= stationPanelX(s) && m.x <= stationPanelX(s) + SP_W));
     if (s) {
       lines.push(s.name + ' REFINERY', s.closed > 0 ? 'CLOSED ' + s.closed + ' DAYS' : 'PAYS $' + price(s).toFixed(2) + ' / UNIT');
-      lines.push('HAULERS SELLING HERE: ' + S.haulers.filter(h => h.side === S.stations.indexOf(s)).length, 'CLICK TO SEND ONE MORE. < > ADJUSTS');
+      lines.push('HAULERS SELLING HERE: ' + S.haulers.filter(h => h.side === S.stations.indexOf(s)).length, '> OR CLICK: MOVE ONE HERE.  <: MOVE ONE AWAY');
       if (s.job) lines.push('CONTRACT: ' + Math.floor(s.job.done) + '/' + s.job.units + 'U BY DAY ' + s.job.deadline, 'REWARD $' + fmt(s.job.cred) + ' + ' + s.job.rd + ' RD');
     }
     else if (m.y > SURF - 30) {
@@ -2376,15 +2438,6 @@ function wrap(str, n) {
   }
   if (line) out.push(line);
   return out;
-}
-function drawHaulerPicker() {
-  const x = 140, y = 300, w = 168, h = 40;
-  panel(x, y, w, h, P.navy, P.cyan);
-  txt('NEW HAULER $' + COST.hauler + ' - SELL WHERE?', x + w / 2, y + 5, P.white, 1, 'c');
-  S.stations.forEach((s2, i) => {
-    button(x + 6 + i * 80, y + 15, 76, 14, (i ? '' : '< ') + s2.name + ' $' + price(s2).toFixed(1) + (i ? ' >' : ''), () => buyHaulerSide(i), { color: P.dblue, hc: P.blue, tc: s2.closed > 0 ? P.red : P.yellow });
-  });
-  txt('ARROW KEYS OR CLICK', x + w / 2, y + 32, P.gray, 1, 'c');
 }
 function drawPerkChips() {
   let x = 4;
@@ -2486,7 +2539,6 @@ function renderPlay() {
   drawTooltip();
   drawTaunt();
   if (S.abil.on > 0) txtS(CHAR().active.name + ' ACTIVE - ' + S.abil.on + ' DAYS', 320, 304, blink() ? P.yellow : P.orange, 1, 'c');
-  if (S.hpick) drawHaulerPicker();
   if (S.bm) drawBlackMarket();
   if (S.choice) drawCards();
   if (S.paused) drawPauseMenu();
@@ -2599,8 +2651,10 @@ function renderSummary() {
     if (!rr.active && !rr.bought) continue;
     row(RIVALS[rr.id].short + (rr.active ? ' PUMPED ' + fmt(rr.pumped) + 'U' : ' (ELSEWHERE)'), '+' + rr.bought + ' SH = ' + G.rshares[rr.id], y, rcol(rr.id)); y += 11;
   }
-  row('YOUR SHARES', '' + G.shares, y, P.cyan); y += 14;
-  if (r.stipend) { txt('THE CONSORTIUM SENT AN EMERGENCY STIPEND: $' + fmt(r.stipend), 320, y, P.orange, 1, 'c'); y += 10; }
+  row('YOUR SHARES', '' + G.shares, y, P.cyan); y += 11;
+  if (G.debt > 0) { row('DEBT (INCL $' + fmt(r.interest || 0) + ' INTEREST)', '$' + fmt(G.debt), y, P.orange); y += 11; }
+  y += 3;
+  if (r.stipend) { txt('THE CONSORTIUM TOPPED YOU UP TO $' + fmt(START_FLOOR) + ' (+$' + fmt(r.stipend) + ')', 320, y, P.orange, 1, 'c'); y += 10; }
   txt('$' + fmt(G.credits) + '   ' + G.rd + ' RD', 320, y + 2, P.yellow, 2, 'c');
   button(250, 300, 140, 16, 'CONTINUE', () => { if (G.rshares[topRival()] >= 51) endRun(false); else screen = 'shop'; sfx('click'); });
 }
@@ -2742,8 +2796,11 @@ function renderShop() {
     txt('LAST SECTOR PROFIT', 430, y, P.lgray); txt((profit < 0 ? '-$' : '$') + fmt(Math.abs(profit)), 620, y, profit >= 0 ? P.lime : P.red, 1, 'r'); y += 9;
     txt('LIFETIME EARNINGS', 430, y, P.lgray); txt('$' + fmt(G.totalEarned), 620, y, P.yellow, 1, 'r'); y += 14;
   }
-  txt('RIVALS BUY SHARES WITH WHAT THEY', 430, y, P.gray); y += 8;
-  txt('PUMP. ANY RIVAL AT 51 = GAME OVER.', 430, y, P.gray);
+  txt('LOAN', 430, y, P.yellow); txt(G.debt ? 'DEBT $' + fmt(G.debt) : 'NO DEBT', 620, y, G.debt ? P.orange : P.lime, 1, 'r'); y += 9;
+  txt('20% INTEREST PER SECTOR. LIMIT $' + fmt(loanLimit()), 430, y, P.gray); y += 10;
+  button(430, y, 60, 14, 'BORROW 1K', borrow, { disabled: G.debt + LOAN_STEP > loanLimit(), color: P.plum, hc: P.crude });
+  button(494, y, 60, 14, 'REPAY 1K', () => repay(false), { disabled: !G.debt || G.credits < 1 });
+  button(558, y, 64, 14, 'REPAY ALL', () => repay(true), { disabled: !G.debt || G.credits < 1 });
   button(6, 338, 120, 16, 'SAVE & EXIT', () => { save(); screen = 'title'; sfx('click'); }, { color: P.dgray });
   button(414, 338, 220, 16, 'CHOOSE SECTOR ' + G.sector + ' >>', () => { screen = 'sectorpick'; sfx('click'); }, { color: P.green, hc: P.lime, tc: P.navy });
 }
@@ -2800,7 +2857,7 @@ function drawTaunt() {
 }
 function drawBlackMarket() {
   rect(0, 0, W, H, 'rgba(5,5,15,0.78)');
-  const w = 400, h = 214, x = (W - w) / 2, y = 64;
+  const w = 400, h = 300, x = (W - w) / 2, y = 28;
   panel(x, y, w, h, '#160c14', P.orange);
   txtS('BLACK MARKET', W / 2, y + 7, P.orange, 2, 'c');
   txt('NO QUESTIONS ASKED. PRICES RISE EACH TIME YOU BUY.' + (isChar('grane') ? ' (SPY DISCOUNT -40%)' : ''), W / 2, y + 24, P.lgray, 1, 'c');
@@ -2809,17 +2866,19 @@ function drawBlackMarket() {
     rect(x + 8, ry, w - 16, 36, '#22121c');
     txt(item.name, x + 14, ry + 5, P.yellow);
     txt(item.desc, x + 14, ry + 14, P.lgray);
-    const c = bmCost(item), can = G.credits >= c, used = item.id === 'short' && S.bmUses.short;
-    txt(used ? 'USED THIS SECTOR' : '$' + fmt(c), x + w - 14, ry + 5, used ? P.gray : can ? P.yellow : P.red, 1, 'r');
+    const isLoan = item.id === 'loan', owned = item.id === 'coupler' && G.couplers;
+    const c = isLoan ? 0 : bmCost(item), can = isLoan ? G.debt + LOAN_STEP <= loanLimit() : G.credits >= c, used = item.id === 'short' && S.bmUses.short;
+    if (isLoan) txt('DEBT $' + fmt(G.debt) + ' / LIMIT $' + fmt(loanLimit()), x + w - 14, ry + 5, G.debt ? P.orange : P.lgray, 1, 'r');
+    else txt(owned ? 'OWNED - ACTIVE ALL RUN' : used ? 'USED THIS SECTOR' : '$' + fmt(c), x + w - 14, ry + 5, owned ? P.lime : used ? P.gray : can ? P.yellow : P.red, 1, 'r');
     let targets;
     if (item.target === 'rival') targets = S.rivals.map(id => [RIVALS[id].short, id, rcol(id)]);
     else if (item.target === 'owner') targets = RIVAL_IDS.filter(id => G.rshares[id] > 0).map(id => [RIVALS[id].short + ' (' + G.rshares[id] + ')', id, rcol(id)]);
     else if (item.target === 'station') targets = S.stations.map(st2 => [st2.name, st2, P.cyan]);
-    else targets = [['BUY', null, P.white]];
+    else targets = [[item.id === 'loan' ? 'BORROW $' + fmt(LOAN_STEP) : 'BUY', null, P.white]];
     let bx = x + 14;
     for (const [label, tgt, col] of targets) {
       const bw = tw(label) + 12;
-      button(bx, ry + 22, bw, 11, label, () => bmBuy(item, tgt), { disabled: !can || used, color: '#3a1a2a', hc: P.plum, tc: col });
+      button(bx, ry + 22, bw, 11, label, () => bmBuy(item, tgt), { disabled: !can || used || owned, color: '#3a1a2a', hc: P.plum, tc: col });
       bx += bw + 4;
     }
     if (!targets.length) txt('NO TARGETS', bx, ry + 25, P.gray);
@@ -2986,7 +3045,6 @@ cv.addEventListener('pointermove', e => {
 cv.addEventListener('pointerleave', () => { mouse.x = -99; mouse.y = -99; });
 cv.addEventListener('pointerdown', e => {
   Sound.init();
-  const wasPick = S && S.hpick;
   const p = toLogical(e); mouse.x = p.x; mouse.y = p.y;
   if (e.button === 2) { if (screen === 'play' && S) { S.tool = null; S.sel = null; S.drag = null; } return; }
   try { cv.setPointerCapture(e.pointerId); } catch (_) { }
@@ -2995,7 +3053,6 @@ cv.addEventListener('pointerdown', e => {
     const b = BTN[i];
     if (inRect(p, b.x, b.y, b.w, b.h)) { mouse.consumed = true; if (b.fn) b.fn(); return; }
   }
-  if (wasPick) { S.hpick = false; mouse.consumed = true; return; }
   if (screen === 'play' && S) playDown(p);
 });
 cv.addEventListener('pointerup', e => {
@@ -3010,11 +3067,6 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (S.choice) { const i = '123'.indexOf(k); if (i >= 0 && S.choice[i]) pickPerk(i); return; }
   if (S.bm && k !== 'escape' && k !== '6') return;
-  if (S.hpick) {
-    if (k === 'arrowleft' || k === 'a') { buyHaulerSide(0); e.preventDefault(); return; }
-    if (k === 'arrowright' || k === 'd') { buyHaulerSide(1); e.preventDefault(); return; }
-    if (k === 'escape') { S.hpick = false; return; }
-  }
   if (k === ' ' || k === 'p') { togglePause(); e.preventDefault(); return; }
   if (k === 'escape') { if (S.bm) S.bm = false; else if (S.help) S.help = false; else if (S.tool || S.sel) { S.tool = null; S.sel = null; } else togglePause(); return; }
   if (S.paused) return;

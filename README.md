@@ -6,7 +6,7 @@ A retro pixel-art space tycoon inspired by *Turmoil*. Buy asteroid plots, scan f
 
 - **Tycoons:** pick 1 of 6 characters, each with a passive bonus and an active ability on `Q` (with a cooldown). Three start unlocked; the other three unlock with Legacy points.
 - **Rival corporations:** The Syndicate (grabs land), Kroll Mining (dumps crude to crash prices) and Hex Corp (sabotages your rigs). Each owns its own shares and taunts you. Any rival reaching 51 shares ends the run.
-- **Black market (`6`):** pay credits to sabotage a rival, bribe the land registry, plant a price rumor, or short a rival's stock.
+- **Black market (`6`):** pay credits to sabotage a rival, bribe the land registry, plant a price rumor, short a rival's stock, buy **Pipe Couplers** (drill one of your rigs' pipes into another's and they share every pocket in the network), or take a quick loan.
 - **Sector picker:** between sectors, choose 1 of 3 sectors. Each has its own rivals, modifiers (Gas-rich, Rocky, Boom Market, Unstable, and more) and a research multiplier.
 - **Legacy (prestige):** every run, win or lose, earns Legacy points. Spend them on the title screen on permanent bonuses and character unlocks.
 
@@ -17,6 +17,10 @@ A retro pixel-art space tycoon inspired by *Turmoil*. Buy asteroid plots, scan f
 - **Achievements:** 16 one-time goals that pay out RD.
 
 It's pure HTML5 canvas with no dependencies, served by nginx. Saves are stored in the browser's localStorage after each sector.
+
+## Money
+
+Every sector starts with at least $2,000. Short on cash? Borrow in $1,000 steps from the shop or the black market (20% interest per sector, repay in the shop).
 
 ## Install on Unraid
 
@@ -74,13 +78,13 @@ docker run -d --name voidcrude -p 8088:80 voidcrude:latest
 |---|---|
 | Click a `BUY $` sign | Buy a plot |
 | `1` / `2` / `4` | Rig / Silo / Scanner placement tool |
-| `3`, then click a side (or ←/→) | Buy a hauler that sells at HELIX (left) or NOVA (right) |
+| `3` | Buy a hauler (it joins the side with fewer haulers) |
 | `5` | Rock blaster (click underground) |
 | `6` | Black market |
 | `Q` | Your tycoon's ability |
 | `1`-`3` on a rank-up | Pick a perk card |
 | Click rig, then underground | Drill a pipe (drag from any pipe to branch) |
-| Click a refinery, or ► on its price panel | Send one more hauler to that side (buys one if needed) |
+| Click a refinery, or ► on its price panel | Move one of your haulers to that side |
 | ◄ on a refinery's price panel | Move one of its haulers to the other side |
 | Click a hauler, then a refinery | Switch that hauler's side |
 | `Space` | Pause menu |
