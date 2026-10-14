@@ -1282,26 +1282,30 @@ function closestOnRig(r, px, py) {
   return best;
 }
 // snap a target onto a nearby joint (10px) or drilled pipe (8px) of any of your rigs, ignoring the start joint
-function snapPoint(px, py, start) {
+function snapPoint(px, py, start, rig) {
+  const rigs = has('coupler') || !rig ? myRigs() : [rig];
   let best = null, bd = 10;
-  for (const r of myRigs()) for (const j of jointsOf(r)) {
+  for (const r of rigs) for (const j of jointsOf(r)) {
     if (j.seg < 0 || (start && Math.hypot(j.x - start.x, j.y - start.y) < 2)) continue;
     const d = Math.hypot(px - j.x, py - j.y);
     if (d < bd) { bd = d; best = { x: j.x, y: j.y, snap: 'joint' }; }
   }
   if (best) return best;
   bd = 8;
-  for (const r of myRigs()) {
+  for (const r of rigs) {
     const c = closestOnRig(r, px, py);
     if (c.d < bd && c.y > UG_TOP && (!start || Math.hypot(c.x - start.x, c.y - start.y) > 3)) { bd = c.d; best = { x: c.x, y: c.y, snap: 'pipe' }; }
   }
   return best || { x: px, y: py, snap: null };
 }
+// a cell holding pipe from a different one of your rigs
+function blockedBy(r, ci) { const o = S.pcell[ci]; return !!o && o !== r.id && S.rigs.some(x => x.id === o && x.owner === 'you'); }
 function layPipe(r, start, tx, ty) {
-  const sp = snapPoint(tx, ty, start);
+  const sp = snapPoint(tx, ty, start, r);
   tx = sp.x; ty = sp.y;
   if (!orderDrill(r, start, tx, ty)) return null;
   const s = S.segs[S.segs.length - 1];
+  if (sp.snap) s.link = true;
   return { x: s.x1 + s.ux * s.len, y: s.y1 + s.uy * s.len, seg: s.id, t: s.len };
 }
 function orderDrill(r, start, tx, ty) {
@@ -1319,6 +1323,7 @@ function stopSeg(s, r, why) {
   s.status = 'stop'; s.len = s.prog;
   if (r.owner === 'you') {
     if (why === 'ROCK') { msg(S.blasts > 0 ? 'DRILL HIT SOLID ROCK! BLAST IT [5] OR STEER AROUND' : 'DRILL HIT SOLID ROCK! (LASER BORE TECH CUTS ROCK)', P.orange); sfx('thud'); }
+    else if (why === 'PIPE') { msg('PIPES CANNOT CROSS EACH OTHER - PIPE COUPLERS (WORKSHOP) LET THEM JOIN', P.orange); sfx('thud'); }
     else msg('DRILL REACHED THE LIMIT', P.lgray);
   }
 }
@@ -1390,6 +1395,7 @@ function updateDrill(r, dt) {
     if (s.prog >= s.len - 1e-6) { s.status = 'done'; break; }
     const nx = s.x1 + s.ux * (s.prog + 1), ny = s.y1 + s.uy * (s.prog + 1);
     const ci = cellIndexAt(nx, ny);
+    if (mine && ci >= 0 && !has('coupler') && blockedBy(r, ci)) { stopSeg(s, r, 'PIPE'); break; }
     let mul = 1;
     if (ci < 0) {
       if (ny >= UG_BOT || nx < 0 || nx >= W) { stopSeg(s, r, 'EDGE'); break; }
@@ -1554,7 +1560,7 @@ function couple(a, b, x, y) {
   (a.links ||= new Set()).add(b); (b.links ||= new Set()).add(a);
   S.joints.push({ x, y });
   msg('PIPES COUPLED: RIG #' + a.id + ' AND RIG #' + b.id + ' NOW SHARE THEIR POCKETS', P.crudeL);
-  float(x, y - 6, 'COUPLED!', P.crudeG);
+  float(x, y - 6, 'COUPLED!', P.cyan);
   sfx('strike');
 }
 function pumpAll(dt) {
@@ -3600,12 +3606,14 @@ function drawPlotFlags() {
 }
 function segPt(s, t) { return [Math.round(s.x1 + s.ux * t), Math.round(s.y1 + s.uy * t)]; }
 // finished pipe is cached on its own layer and only the newly drilled part is painted each frame
-function paintJoint(g, X, Y) {
+// brass flange; blue when the run joined another pipe
+function paintJoint(g, X, Y, blue) {
+  const [body, hi, lo, dot] = blue ? ['#3b7dd8', '#c8ecff', '#1b3f8a', '#0b1a40'] : ['#c8962e', '#ffe08a', '#7a5418', '#3a2808'];
   g.fillStyle = '#05060c'; g.fillRect(X - 4, Y - 3, 9, 7); g.fillRect(X - 3, Y - 4, 7, 9);
-  g.fillStyle = '#c8962e'; g.fillRect(X - 3, Y - 2, 7, 5); g.fillRect(X - 2, Y - 3, 5, 7);
-  g.fillStyle = '#ffe08a'; g.fillRect(X - 2, Y - 2, 3, 1); g.fillRect(X - 2, Y - 2, 1, 2);
-  g.fillStyle = '#7a5418'; g.fillRect(X + 1, Y + 2, 2, 1); g.fillRect(X + 3, Y, 1, 2);
-  g.fillStyle = '#3a2808'; g.fillRect(X, Y, 1, 1);
+  g.fillStyle = body; g.fillRect(X - 3, Y - 2, 7, 5); g.fillRect(X - 2, Y - 3, 5, 7);
+  g.fillStyle = hi; g.fillRect(X - 2, Y - 2, 3, 1); g.fillRect(X - 2, Y - 2, 1, 2);
+  g.fillStyle = lo; g.fillRect(X + 1, Y + 2, 2, 1); g.fillRect(X + 3, Y, 1, 2);
+  g.fillStyle = dot; g.fillRect(X, Y, 1, 1);
 }
 function paintPipe(s, t0, t1) {
   const g = S.pipeX, mine = s.owner === 'you';
@@ -3635,14 +3643,14 @@ function drawPipes() {
     if (s.prog > d + 0.01) { paintPipe(s, d, s.prog); s.drawn = s.prog; }
     if (pass && !s.capped && (s.status === 'done' || s.status === 'stop') && s.prog > 0) {
       s.capped = true;
-      paintJoint(S.pipeX, Math.round((s.x1 + s.ux * s.prog) * R), Math.round((s.y1 + s.uy * s.prog - SURF) * R));
+      paintJoint(S.pipeX, Math.round((s.x1 + s.ux * s.prog) * R), Math.round((s.y1 + s.uy * s.prog - SURF) * R), s.link && s.status === 'done' && s.prog >= s.len - 0.5);
     }
   }
   ctx.drawImage(S.pipeC, 0, SURF, W, UG_BOT - SURF);
   for (const j of S.joints) {
     const X = Math.round(j.x * R), Y = Math.round(j.y * R);
-    q(X - 4, Y - 4, 9, 9, '#05060c'); q(X - 3, Y - 3, 7, 7, '#c46cff'); q(X - 3, Y - 3, 7, 1, '#f3c6ff'); q(X - 1, Y - 1, 3, 3, '#5a1a85');
-    glow(j.x, j.y, 6, '#c46cff', 0.45 + 0.2 * Math.sin(GT * 3 + j.x));
+    q(X - 4, Y - 4, 9, 9, '#05060c'); q(X - 3, Y - 3, 7, 7, '#41a6f6'); q(X - 3, Y - 3, 7, 1, '#c8ecff'); q(X - 3, Y - 3, 1, 7, '#73eff7'); q(X - 1, Y - 1, 3, 3, '#1b2a6e');
+    glow(j.x, j.y, 7, '#41a6f6', 0.5 + 0.2 * Math.sin(GT * 3 + j.x));
   }
   // flowing crude inside your pipes
   const off = (GT * 24) % 8;
@@ -3728,21 +3736,23 @@ function drawPreview() {
   const pv = previewInfo();
   if (!pv) return;
   const { start } = pv;
-  const sp = snapPoint(clamp(mouse.x, 1, W - 2), clamp(mouse.y, UG_TOP + 2, UG_BOT - 2), start);
+  const sp = snapPoint(clamp(mouse.x, 1, W - 2), clamp(mouse.y, UG_TOP + 2, UG_BOT - 2), start, pv.r);
   const tx = sp.x, ty = sp.y;
-  if (sp.snap) { const X = Math.round(tx * R), Y = Math.round(ty * R); q(X - 5, Y - 5, 11, 1, P.lime); q(X - 5, Y + 5, 11, 1, P.lime); q(X - 5, Y - 5, 1, 11, P.lime); q(X + 5, Y - 5, 1, 11, P.lime); glow(tx, ty, 6, '#a7f070', 0.5); }
+  if (sp.snap) { const X = Math.round(tx * R), Y = Math.round(ty * R); q(X - 5, Y - 5, 11, 1, P.sky); q(X - 5, Y + 5, 11, 1, P.sky); q(X - 5, Y - 5, 1, 11, P.sky); q(X + 5, Y - 5, 1, 11, P.sky); glow(tx, ty, 6, '#41a6f6', 0.6); }
   const len = Math.hypot(tx - start.x, ty - start.y);
   if (len < 4) return;
   const ux = (tx - start.x) / len, uy = (ty - start.y) / len, rk = st.rock();
-  let bad = false;
+  let bad = false, cross = false;
   for (let t = 0; t <= len; t += 2) {
     const x = start.x + ux * t, y = start.y + uy * t, ci = cellIndexAt(x, y);
+    if (ci >= 0 && !has('coupler') && blockedBy(pv.r, ci)) bad = cross = true;
     if (ci >= 0 && S.rev[ci]) { const g = S.grid[ci]; if ((g === T_ROCK && rk <= 0) || (g === T_GAS && !has('gas'))) bad = true; }
     if (((t / 2) | 0) % 2 === 0) rect(x | 0, y | 0, 1, 1, bad ? P.red : P.lime);
   }
   rect((start.x | 0) - 1, (start.y | 0) - 1, 3, 3, P.white);
   const cost = Math.ceil(len * st.pipe());
   txtS('$' + cost, tx + 6, ty - 8, G.credits >= cost ? P.yellow : P.red);
+  if (cross) txtS('CROSSES ANOTHER RIG - NEEDS PIPE COUPLERS', tx + 6, ty + 4, P.red);
 }
 function drawGhost() {
   if (!S.tool || overUI()) return;

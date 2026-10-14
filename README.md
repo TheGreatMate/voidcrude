@@ -17,7 +17,7 @@ Six belts of three sectors each (about 1.5 to 2 hours). Each belt adds a hazard 
 
 - **Campaign map:** every step offers two sectors with different rivals and conditions (Bonanza, Boom Market, Unstable quakes and more). Harder picks pay bigger sector bonuses.
 - **One currency:** upgrades and shares cost the same credits, so every upgrade is money you aren't saving for the stock auction.
-- **Workshop:** upgrades across five branches (Drilling, Extraction, Logistics, Markets, Frontier) unlock as you reach each belt, and every upgrade you own makes the rest 4% pricier. Drilling includes **Pipe Couplers** (drill one rig's pipe into another's and the network shares its pockets).
+- **Workshop:** upgrades across five branches (Drilling, Extraction, Logistics, Markets, Frontier) unlock as you reach each belt, and every upgrade you own makes the rest 4% pricier. Drilling includes **Pipe Couplers** (drill one rig's pipe into another's and the network shares its pockets; the junction glows blue). Until you own them, your rigs' pipes can't cross each other.
 - **Stock auctions:** shares only sell after belts 2 to 6, in falling-price lots: wait for a bargain, but a rival may buy first. Rivals bank cash every sector (watch their war chests on the map) and upgrade their own rigs. If nobody has 51 after the final belt, the smallest shareholder is eliminated and their stock is re-auctioned until someone does.
 - **Sector bonuses:** drain all the crude under your land, sell every drop, clear all gas, or withdraw early.
 - **Land auctions:** every plot is won by bidding. Each sector opens with an auction round, any free plot can be auctioned, and rival land grabs go to auction too.
