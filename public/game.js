@@ -464,7 +464,7 @@ const st = {
   rigCap: () => 40 + 25 * has('tank1'),
   siloCap: () => 150 + 100 * has('silo1'),
   siloReach: () => has('silo1') ? 128 : 64,
-  hSpeed: () => 55 * (1 + 0.2 * (has('ion1') + has('ion2'))) * (1 + 0.35 * pk('burn')) * (has('warp') ? 2 : 1) * (S && S.flare > 0 ? 0.5 : 1)
+  hSpeed: () => (stormActive() ? (has('shield2') ? 0.5 : 0) : 1) * 55 * (1 + 0.2 * (has('ion1') + has('ion2'))) * (1 + 0.35 * pk('burn')) * (has('warp') ? 2 : 1) * (S && S.flare > 0 ? 0.5 : 1)
     * (isChar('bolt') ? 1.25 : 1) * (abilOn('bolt') ? 3 : 1),
   hCap: () => 20 + 10 * (has('cargo1') + has('cargo2')) + 10 * pk('cargo'),
   hRate: () => has('warp') ? 2 : 1,
@@ -900,6 +900,7 @@ function genSector(opt) {
     const cap = Math.round(cells.length * UNITS_PER_CELL * (mods.includes('deep') ? 1.5 : 1) * DF().crude);
     S.pockets.push({ id, cells, n: cells.length, cap, amt: cap, cx: (sx / cells.length) * CELL + 2, cy: UG_TOP + (sy / cells.length) * CELL + 2, top });
   }
+  assignHazards(rng);
   // rock caps over some pockets
   for (const p of S.pockets) {
     if (belt >= 2 && rng() < 0.35 + belt * 0.05) {
@@ -1553,7 +1554,7 @@ function pumpAll(dt) {
     let got = 0;
     const each = want / live.length;
     for (const p of live) {
-      const g = Math.min(each, p.amt);
+      const g = Math.min(each * (p.cryo ? cryoFactor(r.owner) : 1), p.amt);
       p.amt -= g; got += g;
       if (p.amt <= 1e-6) {
         p.amt = 0;
@@ -1832,6 +1833,7 @@ function daily() {
   if (S.flare > 0) S.flare--;
   else if (hasMod('storm') && Math.random() < 0.08) { S.flare = 4; msg('SOLAR STORM! HAULERS SLOWED FOR 4 DAYS', P.orange); }
   if (S.jam > 0) S.jam--;
+  hazardDaily(d);
   if (hasMod('quake') && d >= S.nextQuake) { quake(); S.nextQuake = d + 12 + Math.random() * 8; }
   if (S.abil.cd > 0) S.abil.cd--;
   if (S.abil.on > 0 && --S.abil.on === 0) msg(CHAR().active.name + ' WORE OFF', P.lgray);
@@ -2103,7 +2105,7 @@ const BELTS = [
   { name: 'FERTILE DRIFT', hazard: 'CRUDE ONLY - LEARN THE ROPES', col: '#a7f070' },
   { name: 'KESSLER ROCKS', hazard: 'SOLID ROCK BLOCKS YOUR DRILLS', col: '#94b0c2' },
   { name: 'VAPOR FIELDS', hazard: 'GAS POCKETS CAN BLOW OUT RIGS', col: '#73eff7' },
-  { name: 'WRITHING DEEP', hazard: 'LIVING CRUDE CRAWLS AWAY FROM PIPES', col: '#e05cff' },
+  { name: 'WRITHING DEEP', hazard: 'LIVING CRUDE CRAWLS AWAY FROM PIPES', col: '#ff5ca8' },
   { name: 'GLACIER BELT', hazard: 'CRYO-CRUDE PUMPS SLOWLY UNTIL HEATED', col: '#bfe7ff' },
   { name: 'THE VOID REACH', hazard: 'VOID STORMS GROUND HAULERS, FRY RIGS', col: '#c46cff' },
 ];
@@ -2407,6 +2409,91 @@ function renderMap() {
   }, { disabled: !ok, color: P.green, hc: P.lime, tc: P.navy });
 }
 
+// ---------------------------------------------------------------- belt hazards: living crude, cryo-crude, void storms
+const LIVING_RAMP = ['#ffe0ee', '#ff9ccc', '#ff5ca8', '#e03c8c', '#bc2c74', '#96205e', '#701648'];
+const CRYO_RAMP = ['#ffffff', '#e4f6ff', '#bfe7ff', '#9cc9ee', '#7aa6d8', '#5a80b8', '#3e5c94'];
+function assignHazards(rng) {
+  for (const p of S.pockets) {
+    if (S.belt >= 4 && rng() < 0.45) { p.living = true; p.crawlAt = 3 + rng() * 4; p.dir = rng() < 0.5 ? -1 : 1; }
+    else if (S.belt >= 5 && rng() < 0.5) p.cryo = true;
+  }
+  if (S.belt >= 6) S.storm = { next: 10 + rng() * 6, active: 0, warned: false };
+}
+function cryoFactor(owner) { return owner === 'you' ? (has('heat2') ? 1 : has('heat1') ? 0.7 : 0.3) : 0.5; }
+
+// ---- living crude: pockets crawl one cell at a time and can slip away from pipes
+function pipeTouches(r, cellSet) {
+  for (const id of r.segs) {
+    const s = S.segs[id];
+    if (s.status === 'gone' || s.prog <= 0) continue;
+    for (let t = 0; t <= s.prog; t += 2) {
+      const ci = cellIndexAt(s.x1 + s.ux * t, s.y1 + s.uy * t);
+      if (ci < 0) continue;
+      if (cellSet.has(ci) || cellSet.has(ci - 1) || cellSet.has(ci + 1) || cellSet.has(ci - COLS) || cellSet.has(ci + COLS)) return true;
+    }
+  }
+  return false;
+}
+function crawl(p) {
+  const anchored = has('bio') && S.rigs.some(r => r.owner === 'you' && r.pockets.has(p.id));
+  if (anchored || p.amt <= 0) return;
+  const tries = [[p.dir, 0], [0, 1], [0, -1], [-p.dir, 0]];
+  for (const [dc, dr] of tries) {
+    const own = new Set(p.cells);
+    const moved = p.cells.map(i => { const c = i % COLS + dc, r = ((i / COLS) | 0) + dr; return (c < 1 || r < 1 || c >= COLS - 1 || r >= ROWS - 1) ? -1 : r * COLS + c; });
+    if (moved.some(i => i < 0 || (!own.has(i) && S.grid[i] !== T_DIRT))) continue;
+    for (const i of p.cells) { S.grid[i] = T_DIRT; S.pid[i] = -1; }
+    for (const i of moved) { S.grid[i] = T_OIL; S.pid[i] = p.id; }
+    const changed = new Set([...p.cells, ...moved]);
+    p.cells = moved.sort((a, b) => b - a);
+    let sx = 0, sy = 0, top = ROWS;
+    for (const i of p.cells) { const r = (i / COLS) | 0; sx += i % COLS; sy += r; if (r < top) top = r; }
+    p.cx = (sx / p.n) * CELL + 2; p.cy = UG_TOP + (sy / p.n) * CELL + 2; p.top = top;
+    for (const i of changed) paintCell(i);
+    if (dc) p.dir = dc;
+    // pipes that no longer touch the pocket lose it
+    const set = new Set(p.cells);
+    for (const r of S.rigs) {
+      if (!r.pockets.has(p.id) || pipeTouches(r, set)) continue;
+      r.pockets.delete(p.id);
+      if (r.owner === 'you') { msg('LIVING CRUDE CRAWLED AWAY FROM RIG #' + r.id + '! RE-DRILL TO CATCH IT', P.crudeL); float(p.cx, p.cy - 8, 'SLIPPED!', '#ff8ce0'); sfx('alert'); }
+    }
+    return;
+  }
+  p.dir = -p.dir;
+}
+function hazardDaily(d) {
+  for (const p of S.pockets) if (p.living && d >= p.crawlAt) { crawl(p); p.crawlAt = d + 3 + Math.random() * 3; }
+  const st2 = S.storm;
+  if (!st2) return;
+  if (st2.active > 0) {
+    // lightning hits unshielded rigs (rivals too)
+    for (const r of S.rigs) {
+      if (r.offline > 0 || Math.random() > 0.22 || (r.owner === 'you' && has('shield1'))) continue;
+      r.offline = 2; explosion(r.x, SURF - 26, 18);
+      if (r.owner === 'you') { msg('LIGHTNING FRIED RIG #' + r.id + ' - OFFLINE 2 DAYS', P.red); sfx('boom'); S.shake = 6; }
+    }
+    if (--st2.active === 0) { msg('THE VOID STORM HAS PASSED', P.lgray); st2.next = d + 12 + Math.random() * 8; st2.warned = false; }
+  } else if (d >= st2.next) {
+    st2.active = 3;
+    msg('VOID STORM! ' + (has('shield2') ? 'HAULERS SLOWED' : 'HAULERS GROUNDED') + (has('shield1') ? '' : ', RIGS AT RISK'), P.crudeL); sfx('boom'); S.shake = 8;
+  } else if (!st2.warned && d >= st2.next - 2) { st2.warned = true; msg('VOID STORM INBOUND IN 2 DAYS', P.orange); sfx('alert'); }
+}
+function stormActive() { return !!(S && S.storm && S.storm.active > 0); }
+function drawStorm() {
+  if (!stormActive()) return;
+  rect(0, 0, W, UG_TOP, 'rgba(60,20,90,0.35)');
+  if (!S.bolt || GT > S.bolt.t + 0.25) { if (Math.random() < 0.04) S.bolt = { x: 20 + Math.random() * 600, t: GT, seed: Math.random() * 1000 }; }
+  const b = S.bolt;
+  if (b && GT - b.t < 0.25) {
+    let x = b.x, y = 0;
+    const rng = mulberry32(b.seed | 0);
+    while (y < SURF) { const nx = x + (rng() - 0.5) * 14, ny = y + 6 + rng() * 6; for (let t = 0; t <= 1; t += 0.1) q(Math.round((x + (nx - x) * t) * R), Math.round((y + (ny - y) * t) * R), 2, 2, '#f3e6ff'); x = nx; y = ny; }
+    glow(b.x, SURF / 2, 60, '#c46cff', 0.35);
+    rect(0, 0, W, H, 'rgba(230,200,255,' + (0.18 * (1 - (GT - b.t) / 0.25)).toFixed(3) + ')');
+  }
+}
+
 // ---------------------------------------------------------------- update
 function update(dt) {
   S.t += dt;
@@ -2619,14 +2706,17 @@ function drawOil() {
       if (!S.rev[i]) continue;
       any = true;
       const c = i % COLS, r = (i / COLS) | 0, X = c * S8, Y = UG_TOP * R + r * S8;
-      q(X, Y, S8, S8, CRUDE_RAMP[2 + Math.min(4, Math.floor((r - topRow) / span * 4.99))]);
+      const ramp = p.living ? LIVING_RAMP : p.cryo ? CRYO_RAMP : CRUDE_RAMP;
+      q(X, Y, S8, S8, ramp[2 + Math.min(4, Math.floor((r - topRow) / span * 4.99))]);
       if (r === topRow) {
         const wv = Math.sin(GT * 2.5 + c * 0.9) > 0.3 ? 1 : 0;
         if (wv) q(X, Y, S8, 1, '#1c0c28');
-        q(X, Y + wv, S8, 1, CRUDE_RAMP[0]); q(X, Y + wv + 1, S8, 1, CRUDE_RAMP[1]);
-      } else if ((c * 13 + r * 7 + ((GT * 2) | 0)) % 37 === 0) q(X + 3, Y + 5 - (((GT * 8) | 0) % 5), 2, 2, CRUDE_RAMP[1]);
+        q(X, Y + wv, S8, 1, ramp[0]); q(X, Y + wv + 1, S8, 1, ramp[1]);
+      } else if ((c * 13 + r * 7 + ((GT * 2) | 0)) % 37 === 0) q(X + 3, Y + 5 - (((GT * 8) | 0) % 5), 2, 2, ramp[1]);
+      if (p.cryo && (c * 7 + r * 11 + ((GT * 3) | 0)) % 17 === 0) q(X + 2, Y + 2, 2, 2, '#ffffff');
+      if (p.living && (c + r + ((GT * 4) | 0)) % 9 === 0) q(X + 3, Y + 3, 2, 2, '#ffe0ee');
     }
-    if (any) glow(p.cx, UG_TOP + topRow * CELL + 3, Math.max(14, Math.sqrt(p.n) * 4.5), '#b04cff', 0.16 + 0.05 * Math.sin(GT * 2 + p.id));
+    if (any) glow(p.cx, UG_TOP + topRow * CELL + 3, Math.max(14, Math.sqrt(p.n) * 4.5), p.cryo ? '#bfe7ff' : p.living ? '#ff5ca8' : '#b04cff', (p.living ? 0.22 + 0.12 * Math.sin(GT * 4 + p.id) : 0.16 + 0.05 * Math.sin(GT * 2 + p.id)));
   }
 }
 function drawPlotLines() {
@@ -2849,6 +2939,7 @@ function drawTopBar() {
   }
   [1, 2, 4].forEach((v, i) => button(362 + i * 17, 2, 16, 9, v + 'X', () => { S.speed = v; sfx('click'); }, { active: S.speed === v, color: P.dblue, hc: P.blue }));
   if (S.flare > 0) txt('FLARE', 415, 4, P.orange);
+  if (stormActive()) txt('STORM', 415, 4, blink() ? P.crudeL : P.plum);
   txt('BELT ' + S.belt + '/6', 470, 4, BELTS[S.belt - 1].col, 1, 'r');
   txt('SHARES ' + G.shares + ':' + rivalTotal(), 548, 4, P.lgray, 1, 'r');
   txt('$' + fmt(G.credits), W - 4, 4, P.yellow, 1, 'r');
@@ -3010,7 +3101,12 @@ function drawTooltip() {
     const ci = cellIndexAt(m.x, m.y);
     if (ci >= 0 && S.rev[ci]) {
       const t = S.grid[ci];
-      if (t === T_OIL) { const p = S.pockets[S.pid[ci]]; lines.push(p.amt > 0 ? 'VOIDCRUDE POCKET' : 'DRAINED POCKET', fmt(p.amt) + ' / ' + fmt(p.cap) + ' UNITS'); }
+      if (t === T_OIL) {
+        const p = S.pockets[S.pid[ci]];
+        lines.push(p.amt <= 0 ? 'DRAINED POCKET' : p.living ? 'LIVING CRUDE' : p.cryo ? 'CRYO-CRUDE' : 'VOIDCRUDE POCKET', fmt(p.amt) + ' / ' + fmt(p.cap) + ' UNITS');
+        if (p.living) lines.push(has('bio') ? 'BIO-ANCHORS HOLD IT ONCE TAPPED' : 'IT CRAWLS - PIPES CAN LOSE IT');
+        if (p.cryo) lines.push('PUMPS AT ' + Math.round(cryoFactor('you') * 100) + '% SPEED' + (has('heat2') ? '' : ' - HEATED PIPES HELP'));
+      }
       else if (t === T_ROCK) lines.push('SOLID ROCK', st.rock() ? 'LASER BORE CAN CUT IT' : 'BLOCKS DRILLS - BLAST IT [5]');
       else if (t === T_GAS) lines.push('GAS POCKET', has('gas') ? 'SIPHON READY - WORTH $$$' : 'DANGER: BLOWOUT!');
     }
@@ -3111,6 +3207,7 @@ function renderPlay() {
   ctx.drawImage(S.skyC, 0, 0, W, UG_TOP);
   for (const s of S.twinkles) { const a = Math.sin(GT * s.f * 4 + s.p * 6.28); if (a > 0.4) { q(s.x * R, s.y * R, 1, 1, P.white); if (a > 0.9) glow(s.x, s.y, 2.5, '#c8ecff', 0.6); } }
   drawShootingStar();
+  drawStorm();
   ctx.drawImage(S.dirtC, 0, UG_TOP, W, ROWS * CELL);
   drawOil();
   drawFog();
