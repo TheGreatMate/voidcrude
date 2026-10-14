@@ -9,13 +9,13 @@ A retro pixel-art space tycoon inspired by *Turmoil*. Buy asteroid plots, scan f
 
 - **Tycoons:** pick 1 of 6 characters, each with a passive bonus and an active ability on `Q` (with a cooldown). Three start unlocked; the other three unlock with Legacy points.
 - **Rival corporations:** The Syndicate (grabs land), Kroll Mining (dumps crude to crash prices) and Hex Corp (sabotages your rigs). Each owns its own shares and taunts you. Any rival reaching 51 shares ends the run.
-- **Black market (`6`):** pay credits to sabotage a rival, bribe the land registry, plant a price rumor, short a rival's stock, buy **Pipe Couplers** (drill one of your rigs' pipes into another's and they share every pocket in the network), or take a quick loan.
+- **Black market (`6`):** pay credits to sabotage a rival, bribe the land registry, plant a price rumor, short a rival's stock, or take a quick loan.
 - **Sector picker:** between sectors, choose 1 of 3 sectors. Each has its own rivals, modifiers (Gas-rich, Rocky, Boom Market, Unstable, and more) and a research multiplier.
 - **Legacy (prestige):** every run, win or lose, earns Legacy points. Spend them on the title screen on permanent bonuses and character unlocks.
 
 - **Rank-ups (per sector):** selling crude, striking pockets and finishing contracts earn XP. Every rank up pauses the game and deals 3 perk cards (common, rare or epic) to pick from, e.g. Overclock, Prefab Rig, Prospector, Sabotage, Overtime, Motherlode.
 - **Contracts:** HELIX and NOVA post timed delivery contracts that pay credits plus Research Data (RD).
-- **Tech tree (permanent):** RD buys nodes across 4 branches (Drilling, Extraction, Logistics, Markets), each ending in a capstone. Credits go to buildings and shares.
+- **Tech tree (permanent):** RD buys nodes across 4 branches (Drilling, Extraction, Logistics, Markets), each ending in a capstone. Drilling includes **Pipe Couplers**: drill one rig's pipe into another's and every rig in the network shares its pockets. Credits go to buildings and shares.
 - **Rock Blaster:** `5`, then click underground to shatter rock and ignite gas safely. You get 3 charges per sector, upgradable with RD to 10, and the blast radius grows at 6 and 9 charges.
 - **Achievements:** 16 one-time goals that pay out RD.
 

@@ -41,10 +41,11 @@ const TECH = [
   { id: 'bit1', b: 0, row: 0, name: 'PLASMA BIT', cost: 10, req: [], desc: '+35% DRILL SPEED' },
   { id: 'pipe1', b: 0, row: 1, name: 'NANOPIPE', cost: 20, req: ['bit1'], desc: '-30% PIPE COST' },
   { id: 'bit2', b: 0, row: 2, name: 'PLASMA BIT II', cost: 25, req: ['bit1'], desc: 'ANOTHER +35% DRILL SPEED' },
-  { id: 'gas', b: 0, row: 3, name: 'GAS SIPHON', cost: 40, req: ['pipe1'], desc: 'GAS POCKETS PAY OUT INSTEAD OF BLOWING UP' },
-  { id: 'laser1', b: 0, row: 4, name: 'LASER BORE', cost: 45, req: ['bit2'], desc: 'DRILL THROUGH ROCK AT 30% SPEED' },
-  { id: 'laser2', b: 0, row: 5, name: 'LASER BORE II', cost: 80, req: ['laser1'], desc: 'DRILL THROUGH ROCK AT 75% SPEED' },
-  { id: 'seismic', b: 0, row: 6, name: 'SEISMIC BIT', cost: 120, req: ['laser2', 'gas'], cap: true, desc: 'DRILLS REVEAL A WIDE AREA AROUND THEM AND RUN +50% FASTER' },
+  { id: 'coupler', b: 0, row: 3, name: 'PIPE COUPLERS', cost: 35, req: ['pipe1'], desc: "DRILL INTO ANOTHER RIG'S PIPE TO JOIN THEM - THEY SHARE POCKETS" },
+  { id: 'gas', b: 0, row: 4, name: 'GAS SIPHON', cost: 40, req: ['pipe1'], desc: 'GAS POCKETS PAY OUT INSTEAD OF BLOWING UP' },
+  { id: 'laser1', b: 0, row: 5, name: 'LASER BORE', cost: 45, req: ['bit2'], desc: 'DRILL THROUGH ROCK AT 30% SPEED' },
+  { id: 'laser2', b: 0, row: 6, name: 'LASER BORE II', cost: 80, req: ['laser1'], desc: 'DRILL THROUGH ROCK AT 75% SPEED' },
+  { id: 'seismic', b: 0, row: 7, name: 'SEISMIC BIT', cost: 120, req: ['laser2', 'gas'], cap: true, desc: 'DRILLS REVEAL A WIDE AREA AROUND THEM AND RUN +50% FASTER' },
   { id: 'pump1', b: 1, row: 0, name: 'HYPER PUMPS', cost: 10, req: [], desc: '+30% PUMP RATE' },
   { id: 'tank1', b: 1, row: 1, name: 'RIG TANKS', cost: 20, req: ['pump1'], desc: '+25 RIG STORAGE' },
   { id: 'pump2', b: 1, row: 2, name: 'HYPER PUMPS II', cost: 25, req: ['pump1'], desc: 'ANOTHER +30% PUMP RATE' },
@@ -186,7 +187,6 @@ const BLACK_MARKET = [
   { id: 'bribe', name: 'BRIBE THE REGISTRY', desc: 'RIVALS CANNOT BUY LAND FOR 25 DAYS', base: 900 },
   { id: 'rumor', name: 'PLANT A RUMOR', desc: 'A STATION PAYS +35% FOR 6 DAYS', base: 800, target: 'station' },
   { id: 'short', name: 'SHORT THEIR STOCK', desc: 'A RIVAL LOSES 2 CONSORTIUM SHARES (ONCE PER SECTOR)', base: 2500, target: 'owner' },
-  { id: 'coupler', name: 'PIPE COUPLERS', desc: "DRILL INTO ANOTHER OF YOUR RIGS' PIPES TO JOIN THEM (WHOLE RUN)", base: 2000 },
   { id: 'loan', name: 'QUICK LOAN', desc: 'CASH NOW. 20% INTEREST PER SECTOR - REPAY IN THE SHOP', base: 0 },
 ];
 
@@ -552,7 +552,6 @@ function bmCost(item) {
 function bmBuy(item, target) {
   if (item.id === 'loan') { borrow(); return; }
   if (item.id === 'short' && S.bmUses.short) { msg('ALREADY SHORTED A STOCK THIS SECTOR', P.red); sfx('err'); return; }
-  if (item.id === 'coupler' && G.couplers) { msg('YOU ALREADY OWN PIPE COUPLERS', P.lgray); sfx('err'); return; }
   const c = bmCost(item);
   if (!afford(c)) return;
   spend(c);
@@ -569,10 +568,6 @@ function bmBuy(item, target) {
     case 'bribe': S.bribe = 25; msg('THE LAND REGISTRY IS CLOSED TO RIVALS FOR 25 DAYS', P.lime); break;
     case 'rumor': target.mult = Math.max(target.mult, 1.35); target.multT = Math.max(target.multT, 6); msg('RUMORS SPREAD: ' + target.name + ' PAYS +35%', P.lime); break;
     case 'short': G.rshares[target] = Math.max(0, (G.rshares[target] || 0) - 2); msg(RIVALS[target].short + ' STOCK SHORTED: -2 SHARES', P.lime); taunt(target, 'WHO LEAKED OUR BOOKS?!'); break;
-    case 'coupler':
-      G.couplers = true;
-      msg('PIPE COUPLERS INSTALLED: DRILL ONE RIG\'S PIPE INTO ANOTHER RIG\'S PIPE TO JOIN THEM', P.lime);
-      break;
   }
   S.bm = false;
 }
@@ -653,6 +648,7 @@ function loadGame() {
     }
     if (!G.rshares) { G.rshares = { syn: G.rivalShares || 0, kroll: 0, hex: 0 }; delete G.rivalShares; }
     G.rd = G.rd || 0; G.ach = G.ach || {}; G.life = G.life || { contracts: 0 }; G.blaster = G.blaster || BLAST_MIN; G.char = G.char || 'rusty'; G.debt = G.debt || 0;
+    if (G.couplers) { G.tech.coupler = true; delete G.couplers; } // couplers used to be a black market item
     return true;
   } catch (e) { return false; }
 }
@@ -1271,7 +1267,36 @@ function nearestJoint(r, px, py) {
   return best;
 }
 // lay a pipe run; returns the new joint at its far end so the next click can chain from it
+function closestOnRig(r, px, py) {
+  let best = { x: r.x, y: SURF + 1, d: Math.hypot(px - r.x, py - SURF - 1) };
+  for (const id of r.segs) {
+    const s = S.segs[id];
+    if (s.status === 'gone' || s.prog <= 0) continue;
+    const t = clamp((px - s.x1) * s.ux + (py - s.y1) * s.uy, 0, s.prog);
+    const x = s.x1 + s.ux * t, y = s.y1 + s.uy * t, d = Math.hypot(px - x, py - y);
+    if (d < best.d) best = { x, y, d };
+  }
+  return best;
+}
+// snap a target onto a nearby joint (10px) or drilled pipe (8px) of any of your rigs, ignoring the start joint
+function snapPoint(px, py, start) {
+  let best = null, bd = 10;
+  for (const r of myRigs()) for (const j of jointsOf(r)) {
+    if (j.seg < 0 || (start && Math.hypot(j.x - start.x, j.y - start.y) < 2)) continue;
+    const d = Math.hypot(px - j.x, py - j.y);
+    if (d < bd) { bd = d; best = { x: j.x, y: j.y, snap: 'joint' }; }
+  }
+  if (best) return best;
+  bd = 8;
+  for (const r of myRigs()) {
+    const c = closestOnRig(r, px, py);
+    if (c.d < bd && c.y > UG_TOP && (!start || Math.hypot(c.x - start.x, c.y - start.y) > 3)) { bd = c.d; best = { x: c.x, y: c.y, snap: 'pipe' }; }
+  }
+  return best || { x: px, y: py, snap: null };
+}
 function layPipe(r, start, tx, ty) {
+  const sp = snapPoint(tx, ty, start);
+  tx = sp.x; ty = sp.y;
   if (!orderDrill(r, start, tx, ty)) return null;
   const s = S.segs[S.segs.length - 1];
   return { x: s.x1 + s.ux * s.len, y: s.y1 + s.uy * s.len, seg: s.id, t: s.len };
@@ -1403,9 +1428,19 @@ function updateDrill(r, dt) {
       if (pc >= 0) {
         const o = S.pcell[pc];
         if (!o) S.pcell[pc] = r.id;
-        else if (o !== r.id && G.couplers) {
+        else if (o !== r.id && has('coupler')) {
           const other = S.rigs.find(x => x.id === o && x.owner === 'you');
-          if (other && !netOf(r).has(other)) { couple(r, other, tx, ty); s.len = s.prog; s.status = 'done'; break; }
+          if (other && !netOf(r).has(other)) {
+            const cp = closestOnRig(other, tx, ty), d = Math.hypot(cp.x - tx, cp.y - ty);
+            s.len = s.prog; s.status = 'done'; s.capped = true;
+            if (d > 0.5) {
+              const c = { id: S.segs.length, rig: r.id, owner: 'you', x1: tx, y1: ty, ux: (cp.x - tx) / d, uy: (cp.y - ty) / d, len: d, prog: d,
+                status: 'done', parent: s.id, tPar: s.prog, tx: cp.x, ty: cp.y, capped: true, bridge: true };
+              S.segs.push(c); r.segs.push(c.id);
+            }
+            couple(r, other, cp.x, cp.y);
+            break;
+          }
         }
       }
     }
@@ -2317,7 +2352,7 @@ function paintPipe(s, t0, t1) {
     g.fillStyle = hi; g.fillRect(X - 1, Y - 1, 1, 1);
     g.fillStyle = lo; g.fillRect(X + 1, Y + 1, 1, 1);
   }
-  if (t0 === 0) paintJoint(g, ...pt(0));
+  if (t0 === 0 && !s.bridge) paintJoint(g, ...pt(0));
 }
 function drawPipes() {
   if (S.pipeReset) { S.pipeX.clearRect(0, 0, S.pipeC.width, S.pipeC.height); for (const s of S.segs) { s.drawn = 0; s.capped = false; } S.pipeReset = false; }
@@ -2421,7 +2456,9 @@ function drawPreview() {
   const pv = previewInfo();
   if (!pv) return;
   const { start } = pv;
-  const tx = clamp(mouse.x, 1, W - 2), ty = clamp(mouse.y, UG_TOP + 2, UG_BOT - 2);
+  const sp = snapPoint(clamp(mouse.x, 1, W - 2), clamp(mouse.y, UG_TOP + 2, UG_BOT - 2), start);
+  const tx = sp.x, ty = sp.y;
+  if (sp.snap) { const X = Math.round(tx * R), Y = Math.round(ty * R); q(X - 5, Y - 5, 11, 1, P.lime); q(X - 5, Y + 5, 11, 1, P.lime); q(X - 5, Y - 5, 1, 11, P.lime); q(X + 5, Y - 5, 1, 11, P.lime); glow(tx, ty, 6, '#a7f070', 0.5); }
   const len = Math.hypot(tx - start.x, ty - start.y);
   if (len < 4) return;
   const ux = (tx - start.x) / len, uy = (ty - start.y) / len, rk = st.rock();
@@ -2621,7 +2658,7 @@ function drawSelPanel() {
       let live = 0; for (const id of netPockets(o)) live += S.pockets[id].amt;
       const nl = netOf(o).size - 1;
       const state = o.offline > 0 ? 'OFFLINE ' + o.offline + ' DAYS' : o.drilling ? 'DRILLING' : o.pumping ? 'PUMPING' : o.tank >= st.rigCap() - 0.01 ? 'TANK FULL' : 'IDLE';
-      lines = ['RIG #' + o.id + ' - ' + state + (nl ? '   COUPLED TO ' + nl + ' RIG' + (nl > 1 ? 'S' : '') : ''), 'TANK ' + fmt(o.tank) + '/' + st.rigCap() + '   CRUDE LEFT IN POCKETS ' + fmt(live) + 'U', G.couplers ? 'DRILL INTO ANOTHER RIG\'S PIPE TO COUPLE THEM' : 'CLICK TO ADD PIPE JOINTS. DRAG FROM A JOINT TO BRANCH. RIGHT-CLICK ENDS'];
+      lines = ['RIG #' + o.id + ' - ' + state + (nl ? '   COUPLED TO ' + nl + ' RIG' + (nl > 1 ? 'S' : '') : ''), 'TANK ' + fmt(o.tank) + '/' + st.rigCap() + '   CRUDE LEFT IN POCKETS ' + fmt(live) + 'U', has('coupler') ? 'DRILL INTO ANOTHER RIG\'S PIPE TO COUPLE THEM' : 'CLICK TO ADD PIPE JOINTS. DRAG FROM A JOINT TO BRANCH. RIGHT-CLICK ENDS'];
       btns = [['STOP DRILL', () => stopDrill(o), { disabled: !activeSeg(o) }], ['SCRAP +$' + Math.round(COST.rig * 0.4), () => scrapRig(o), { color: P.red }]];
     } else if (S.sel.kind === 'hauler') {
       lines = ['HAULER - ' + haulerLabel(o), 'CARGO ' + fmt(o.cargo) + '/' + st.hCap() + '   SELLS AT ' + S.stations[o.side].name + (has('auto') ? ' (SMART)' : ''), 'FULLY AUTOMATIC. PICK ITS SIDE ON THE RIGHT'];
@@ -2908,7 +2945,7 @@ function buyShares(n) {
 }
 
 // tech tree layout: 4 branch columns, prerequisite lines routed in "lanes" left of each column
-const TREE = { colX: b => 14 + b * 98, nodeX: b => 24 + b * 98, nodeY: r => 50 + r * 33, nw: 84, nh: 28, lanes: [] };
+const TREE = { colX: b => 14 + b * 98, nodeX: b => 24 + b * 98, nodeY: r => 50 + r * 29, nw: 84, nh: 24, lanes: [] };
 (function routeLanes() {
   const edges = [];
   for (const t of TECH) for (const q of t.req) {
@@ -2935,7 +2972,7 @@ function drawTechTree() {
     const lit = has(e.src);
     const col = lit ? BRANCHES[e.b].col : P.dgray;
     const lx = TREE.nodeX(e.b) - 3 - e.lane * 3;
-    const y1 = TREE.nodeY(e.from) + 14, y2 = TREE.nodeY(e.to) + 14;
+    const y1 = TREE.nodeY(e.from) + 12, y2 = TREE.nodeY(e.to) + 12;
     rect(lx, y1, 1, y2 - y1 + 1, col);
     rect(lx, y1, TREE.nodeX(e.b) - lx, 1, col);
     rect(lx, y2, TREE.nodeX(e.b) - lx, 1, col);
@@ -2952,10 +2989,10 @@ function drawTechTree() {
     rect(x + 1, y + 1, w - 2, h - 2, bg);
     if (s === 'owned') rect(x + 1, y + 1, 2, h - 2, bc);
     if (t.cap) brackets(x - 2, y - 2, w + 4, h + 4, s === 'owned' ? P.yellow : P.orange);
-    txt(t.name, x + 5, y + 5, s === 'locked' ? P.gray : P.white);
+    txt(t.name, x + 5, y + 4, s === 'locked' ? P.gray : P.white);
     const status = s === 'owned' ? 'RESEARCHED' : s === 'locked' ? 'LOCKED  ' + t.cost + ' RD' : t.cost + ' RD';
-    txt(status, x + 5, y + 16, s === 'owned' ? P.lime : s === 'ready' ? P.cyan : s === 'poor' ? P.red : P.gray);
-    if (t.cap) txt('CAP', x + w - 4, y + 16, P.orange, 1, 'r');
+    txt(status, x + 5, y + 13.5, s === 'owned' ? P.lime : s === 'ready' ? P.cyan : s === 'poor' ? P.red : P.gray);
+    if (t.cap) txt('CAP', x + w - 4, y + 13.5, P.orange, 1, 'r');
     BTN.push({ x, y, w, h, fn: () => buyTech(t) });
   }
   // rock blaster track
@@ -3096,7 +3133,7 @@ function drawTaunt() {
 }
 function drawBlackMarket() {
   rect(0, 0, W, H, 'rgba(5,5,15,0.78)');
-  const w = 400, h = 300, x = (W - w) / 2, y = 28;
+  const w = 400, h = 60 + BLACK_MARKET.length * 40, x = (W - w) / 2, y = Math.round((H - h) / 2) - 10;
   panel(x, y, w, h, '#160c14', P.orange);
   txtS('BLACK MARKET', W / 2, y + 7, P.orange, 2, 'c');
   txt('NO QUESTIONS ASKED. PRICES RISE EACH TIME YOU BUY.' + (isChar('grane') ? ' (SPY DISCOUNT -40%)' : ''), W / 2, y + 24, P.lgray, 1, 'c');
@@ -3105,10 +3142,10 @@ function drawBlackMarket() {
     rect(x + 8, ry, w - 16, 36, '#22121c');
     txt(item.name, x + 14, ry + 5, P.yellow);
     txt(item.desc, x + 14, ry + 14, P.lgray);
-    const isLoan = item.id === 'loan', owned = item.id === 'coupler' && G.couplers;
+    const isLoan = item.id === 'loan';
     const c = isLoan ? 0 : bmCost(item), can = isLoan ? G.debt + LOAN_STEP <= loanLimit() : G.credits >= c, used = item.id === 'short' && S.bmUses.short;
     if (isLoan) txt('DEBT $' + fmt(G.debt) + ' / LIMIT $' + fmt(loanLimit()), x + w - 14, ry + 5, G.debt ? P.orange : P.lgray, 1, 'r');
-    else txt(owned ? 'OWNED - ACTIVE ALL RUN' : used ? 'USED THIS SECTOR' : '$' + fmt(c), x + w - 14, ry + 5, owned ? P.lime : used ? P.gray : can ? P.yellow : P.red, 1, 'r');
+    else txt(used ? 'USED THIS SECTOR' : '$' + fmt(c), x + w - 14, ry + 5, used ? P.gray : can ? P.yellow : P.red, 1, 'r');
     let targets;
     if (item.target === 'rival') targets = S.rivals.map(id => [RIVALS[id].short, id, rcol(id)]);
     else if (item.target === 'owner') targets = RIVAL_IDS.filter(id => G.rshares[id] > 0).map(id => [RIVALS[id].short + ' (' + G.rshares[id] + ')', id, rcol(id)]);
@@ -3117,7 +3154,7 @@ function drawBlackMarket() {
     let bx = x + 14;
     for (const [label, tgt, col] of targets) {
       const bw = tw(label) + 12;
-      button(bx, ry + 22, bw, 11, label, () => bmBuy(item, tgt), { disabled: !can || used || owned, color: '#3a1a2a', hc: P.plum, tc: col });
+      button(bx, ry + 22, bw, 11, label, () => bmBuy(item, tgt), { disabled: !can || used, color: '#3a1a2a', hc: P.plum, tc: col });
       bx += bw + 4;
     }
     if (!targets.length) txt('NO TARGETS', bx, ry + 25, P.gray);
