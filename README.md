@@ -24,11 +24,18 @@ Six belts of three sectors each (about 1.5 to 2 hours). Each belt adds a hazard 
 - **The Cantina:** between sectors, Moxie, Old Zeke and Sly Vex sell one-sector deals: hot tips, cheap rigs, price fixes, hired muscle and side bets.
 - **Minimum sell price:** set a floor on each refinery; haulers hold their crude until the price beats it.
 - **Difficulty:** Easy, Normal or Hard on the character screen (Hard pays 50% more Legacy).
+- **Void Worm boss:** the last sector of every belt is a worm lair (marked BOSS on the map). Mid-sector the worm burrows in and chews through pipes, yours and the rivals'. Blast its head (`5`) for big damage, or drop Glitch (`7`), who hunts it down and bites. Slay it for a sector bonus and the relic it coughs up.
+- **Endless mode:** win the campaign and you can keep drilling into The Beyond: every hazard at once, tougher rivals, leaner crude, a worm every third depth, and a sales quota per sector that keeps rising. Miss a quota and the run ends, paying Legacy for each depth cleared.
 
 ## Also in the game
 
+- **Tutorial:** Old Zeke walks you through your first sector step by step, with an arrow pointing at what to click next. It's on for your first run; toggle it on the character screen, or skip it any time.
 - **Tycoons:** 6 characters, each with a passive bonus and an active ability on `Q`. Three unlock with Legacy points.
 - **Rivals:** The Syndicate (grabs land), Kroll Mining (crashes prices) and Hex Corp (sabotages rigs), with taunts.
+- **Dirty tricks:** rivals siphon your rigs (click the rig to rip the siphon out), bribe a refinery to pay you 25% less, dump crude to crash prices, sabotage rigs, and launch raider drones that steal half a hauler's load (click a drone to shoot it down for salvage). Hit a rival back through the black market and they hold a **grudge**: more frequent tricks for a few sectors.
+- **Buried relics:** artifacts hide in the dirt. Run a pipe through one or blast it to dig it up, then sell it to the collector or keep its one-sector power (price boost, drill speed, star chart, extra blasts, a totem that slows rival pumps and more). Glitch sniffs them out.
+- **VNN news ticker:** headlines scroll along the bottom: shortages, double-price days, crude gluts, dock strikes, pipe-steel sales, survey leaks, rival scandals, plus some nonsense.
+- **The smuggler:** sometimes a smuggler ship parks mid-sky for a few days and pays about double. Send haulers with its `< >` panel or by clicking it, but every delivery risks an inspection fine, and the risk climbs.
 - **Black market (`6`):** sabotage a rival, bribe the land registry, plant a price rumor, short a rival's stock, or take a quick loan.
 - **Rank-ups:** selling and striking crude earns XP; each rank deals 3 perk cards to pick from.
 - **Contracts:** refineries post timed delivery jobs for credits.
@@ -116,6 +123,10 @@ docker run -d --name voidcrude -p 8088:80 voidcrude:latest
 | Click a hauler, then a refinery | Switch that hauler's side |
 | `Space` | Pause menu (includes **End Sector Early**); buy the current lot at a stock auction |
 | `-` / `+` on a refinery panel | Set its minimum sell price |
+| `1` / `2` on a relic | Sell it / keep its power |
+| Click a siphoned rig | Rip the rival siphon out |
+| Click a raider drone | Shoot it down |
+| Click the smuggler ship, or ► on its panel | Send a hauler to smuggle (◄ brings one back) |
 | `1X` `2X` `4X` (top bar) or `F` | Game speed |
 | `Tab` | Cycle haulers |
 | `Esc` / right-click | Cancel |

@@ -207,8 +207,10 @@ const HELP = [
   '7. SILOS [2] STORE OVERFLOW. SET A MIN SELL PRICE ON EACH REFINERY.',
   '8. ROCK IN THE WAY? ROCK BLASTER [5] CLEARS IT. LIMITED CHARGES.',
   '',
-  'PRICES SWING. DUMPING LOTS AT ONE STATION DROPS ITS PRICE.',
+  'PRICES SWING - WATCH THE VNN TICKER. SMUGGLERS PAY MORE BUT RISK FINES.',
   'RIVAL CORPS GRAB LAND, DRAIN SHARED POCKETS AND PLAY DIRTY.',
+  'CLICK A SIPHONED RIG TO RIP THE SIPHON OUT. CLICK RAIDER DRONES TO SHOOT.',
+  'PIPES AND BLASTS DIG UP RELICS. EACH BELT ENDS WITH A VOID WORM BOSS.',
   "Q: YOUR TYCOON'S ABILITY.   6: BLACK MARKET DIRTY TRICKS.",
   'CAMPAIGN: 6 BELTS X 3 SECTORS. EACH BELT ADDS A NEW HAZARD.',
   'UPGRADES AND SHARES COST THE SAME CREDITS. SHARES SELL AT STOCK AUCTIONS.',
@@ -464,7 +466,7 @@ const st = {
   rigCap: () => 40 + 25 * has('tank1'),
   siloCap: () => 150 + 100 * has('silo1'),
   siloReach: () => has('silo1') ? 128 : 64,
-  hSpeed: () => (stormActive() ? (has('shield2') ? 0.5 : 0) : 1) * 55 * (1 + 0.2 * (has('ion1') + has('ion2'))) * (1 + 0.35 * pk('burn')) * (has('warp') ? 2 : 1) * (S && S.flare > 0 ? 0.5 : 1)
+  hSpeed: () => (stormActive() ? (has('shield2') ? 0.5 : 0) : 1) * 55 * (1 + 0.2 * (has('ion1') + has('ion2'))) * (1 + 0.35 * pk('burn')) * (has('warp') ? 2 : 1) * (S && S.flare > 0 ? 0.5 : 1) * (S && S.rush > 0 ? 1.5 : 1)
     * (isChar('bolt') ? 1.25 : 1) * (abilOn('bolt') ? 3 : 1),
   hCap: () => 20 + 10 * (has('cargo1') + has('cargo2')) + 10 * pk('cargo'),
   hRate: () => has('warp') ? 2 : 1,
@@ -472,7 +474,7 @@ const st = {
   scanRy: () => 96 * (has('scan1') ? 1.3 : 1) * (isChar('kade') ? 1.4 : 1),
   scanCost: () => COST.scan * (has('scan1') ? 0.5 : 1) * (isChar('kade') ? 0.5 : 1),
   rigCost: () => pk('rig') > 0 ? 0 : COST.rig * (S && S.deal && S.deal.rigHalf ? 0.5 : 1),
-  pipe: () => (has('pipe1') ? 0.7 : 1) * Math.pow(0.5, pk('pipe')) * (isChar('rusty') ? 0.85 : 1),
+  pipe: () => (has('pipe1') ? 0.7 : 1) * Math.pow(0.5, pk('pipe')) * (isChar('rusty') ? 0.85 : 1) * (S && S.steel > 0 ? 0.5 : 1),
   sellMul: () => 1 + 0.08 * (has('broker1') + has('broker2')) + 0.15 * pk('price') + (isChar('mara') ? 0.1 : 0) + 0.03 * lv('savvy'),
   satMul: () => has('maker') ? 0.25 : 1,
   jobMul: () => (has('negot') ? 1.5 : 1) * (isChar('mara') ? 1.25 : 1) * (hasMod('slump') ? 2 : 1),
@@ -564,12 +566,12 @@ function bmBuy(item, target) {
       let n = 0;
       for (const r of S.rigs) if (r.owner === target) { r.offline = Math.max(r.offline, 7); n++; explosion(r.x, SURF - 14, 14); }
       msg(n ? RIVALS[target].short + ' RIGS SABOTAGED (' + n + ')' : RIVALS[target].short + ' HAS NO RIGS - MONEY WASTED', n ? P.lime : P.orange);
-      if (n) taunt(target, 'YOU WILL PAY FOR THAT.');
+      if (n) { taunt(target, 'YOU WILL PAY FOR THAT.'); addGrudge(target, 1); }
       break;
     }
     case 'bribe': S.bribe = 25; msg('THE LAND REGISTRY IS CLOSED TO RIVALS FOR 25 DAYS', P.lime); break;
     case 'rumor': target.mult = Math.max(target.mult, 1.35); target.multT = Math.max(target.multT, 6); msg('RUMORS SPREAD: ' + target.name + ' PAYS +35%', P.lime); break;
-    case 'short': G.rshares[target] = Math.max(0, (G.rshares[target] || 0) - 2); msg(RIVALS[target].short + ' STOCK SHORTED: -2 SHARES', P.lime); taunt(target, 'WHO LEAKED OUR BOOKS?!'); break;
+    case 'short': G.rshares[target] = Math.max(0, (G.rshares[target] || 0) - 2); msg(RIVALS[target].short + ' STOCK SHORTED: -2 SHARES', P.lime); taunt(target, 'WHO LEAKED OUR BOOKS?!'); addGrudge(target, 1); break;
   }
   S.bm = false;
 }
@@ -613,7 +615,7 @@ function drawPortrait(L, x, y, s = 1) {
 function newGame(charId) {
   G = { seed: (Math.random() * 1e9) | 0, sector: 1, credits: 2000 + 750 * lv('cap'), tech: {}, ach: {}, blaster: BLAST_MIN,
     life: { contracts: 0 }, shares: 0, rshares: { syn: 0, kroll: 0, hex: 0 }, totalEarned: 0, report: null, char: charId || 'rusty', debt: 0,
-    diff: TS.diff || 'normal', path: [], unsold: 0, history: [] };
+    diff: TS.diff || 'normal', path: [], unsold: 0, history: [], tutorial: !!TS.tutorial };
   const rc = Math.round(3000 * DIFFS[G.diff].rival);
   G.rcash = { syn: rc, kroll: rc, hex: rc }; G.rtech = { syn: 0, kroll: 0, hex: 0 };
   genMap();
@@ -771,6 +773,8 @@ function blast(x, y) {
     else if (S.grid[i] === T_GAS) gases.add(S.pid[i]);
   }
   for (const g of gases) if (S.gases[g].live) releaseGas(S.gases[g]);
+  digRelics(x, y, R * CELL + 2);
+  wormBlast(x, y, R * CELL);
   explosion(x, y, 40);
   for (let k = 0; k < 16; k++) part(x, y, (Math.random() - 0.5) * 60, (Math.random() - 0.5) * 60, 0.8, pick(['#626574', '#8b90a0', '#4a3530']), 40, 2);
   S.shake = 7;
@@ -833,7 +837,7 @@ function mkStation(name, x, base, rng) {
   return s;
 }
 function rawPrice(s, day) { const a = s.amp || 1; return s.base * (1 + 0.3 * a * Math.sin(day / s.p1 * 6.283 + s.f1) + 0.12 * a * Math.sin(day / s.p2 * 6.283 + s.f2)); }
-function price(s) { return Math.max(1, rawPrice(s, S.day) * s.sat * s.mult * st.sellMul()); }
+function price(s) { return Math.max(1, rawPrice(s, S.day) * s.sat * s.mult * st.sellMul() * (s.bribed > 0 ? 0.75 : 1)); }
 
 // ---------------------------------------------------------------- contracts
 function postJob(s) {
@@ -880,9 +884,13 @@ function genSector(opt) {
     mods, rivals: opt.rivals, payMul: opt.payMul || 1, rv: {}, taunt: null, bm: false, bmUses: {}, bribe: 0,
     abil: { cd: 0, on: 0 }, jam: 0, nextQuake: 10 + rng() * 6,
     nextEvent: 16 + rng() * 10, flare: 0, name: opt.name, stations: [], twinkles: [],
+    tier: G.endless ? Math.max(1, G.sector - TOTAL_SECTORS) : 0, drones: [], relicQ: [], newsQ: [], news: null, smug: null,
+    nextSmug: 15 + rng() * 20, nextFlavor: 4 + rng() * 6, tut: G.tutorial && G.sector === 1 ? { step: 0 } : null,
   };
   for (const id of opt.rivals) S.rv[id] = { pumped: 0, nextBuy: (d === 0 ? 14 : 8) + rng() * 10, queue: [], nextTrick: 14 + rng() * 10 };
   if (mods.includes('long')) S.days += 20;
+  if (S.tut) S.days += 15;
+  S.quota = G.endless ? endlessQuota(S.tier) : 0;
   // crude pockets
   const nP = Math.round((10 + Math.floor(rng() * 4) + Math.min(d, 3)) * (mods.includes('bonanza') ? 1.4 : 1));
   const minRow = Math.min(5 + (belt - 1) * 3, 20) + (mods.includes('deep') ? 10 : 0);
@@ -898,7 +906,7 @@ function genSector(opt) {
     cells.sort((a, b) => b - a); // bottom rows first
     let sx = 0, sy = 0, top = ROWS;
     for (const i of cells) { const r = (i / COLS) | 0; sx += i % COLS; sy += r; if (r < top) top = r; }
-    const cap = Math.round(cells.length * UNITS_PER_CELL * (mods.includes('deep') ? 1.5 : 1) * DF().crude);
+    const cap = Math.round(cells.length * UNITS_PER_CELL * (mods.includes('deep') ? 1.5 : 1) * DF().crude * (1 - Math.min(0.45, 0.04 * S.tier)));
     S.pockets.push({ id, cells, n: cells.length, cap, amt: cap, cx: (sx / cells.length) * CELL + 2, cy: UG_TOP + (sy / cells.length) * CELL + 2, top });
   }
   assignHazards(rng);
@@ -924,6 +932,8 @@ function genSector(opt) {
     const cells = blob(rng() * COLS, 3 + rng() * (ROWS - 4), 2 + rng() * 8, 1 + rng() * 2.5, rng);
     for (const i of cells) S.grid[i] = T_ROCK;
   }
+  placeRelics(rng);
+  scheduleWorm(rng);
   // plots
   for (let k = 0; k < NPLOTS; k++) {
     const x0 = PLOT_X0 + k * PLOT_W, x1 = x0 + PLOT_W;
@@ -951,11 +961,15 @@ function genSector(opt) {
   if (isChar('bolt')) spawnHauler();
   S.sel = null;
   for (let k = 0; k < 24; k++) S.twinkles.push({ x: (Math.random() * W) | 0, y: 14 + ((Math.random() * 60) | 0), f: 0.3 + Math.random(), p: Math.random() });
-  msg('SECTOR ' + G.sector + '/' + TOTAL_SECTORS + ': ' + S.name + ' (BELT ' + belt + ') - ' + S.days + ' DAYS ON THE CLOCK', P.cyan);
-  if (G.sector % SECTORS_PER_BELT === 1) msg('NEW BELT: ' + BELTS[belt - 1].name + ' - ' + BELTS[belt - 1].hazard, BELTS[belt - 1].col);
+  if (G.endless) msg('ENDLESS DEPTH ' + S.tier + ': ' + S.name + ' - SELL ' + fmt(S.quota) + ' UNITS IN ' + S.days + ' DAYS', '#c46cff');
+  else msg('SECTOR ' + G.sector + '/' + TOTAL_SECTORS + ': ' + S.name + ' (BELT ' + belt + ') - ' + S.days + ' DAYS ON THE CLOCK', P.cyan);
+  if (S.worm) msg('THIS SECTOR IS A VOID WORM LAIR. KEEP SOME BLASTER CHARGES', P.red);
+  if (!G.endless && G.sector % SECTORS_PER_BELT === 1) msg('NEW BELT: ' + BELTS[belt - 1].name + ' - ' + BELTS[belt - 1].hazard, BELTS[belt - 1].col);
   const lots = S.plots.filter(p => !p.owner).sort(() => Math.random() - 0.5).slice(0, G.sector === 1 ? 2 : 3).sort((a, b) => a.i - b.i);
   for (const p of lots) startAuction(p, null);
   if (G.sector > 1 || opt.rivals.length) taunt(opt.rivals[0]);
+  const grudger = opt.rivals.find(id => grudgeOf(id) >= 1);
+  if (grudger) { taunt(grudger, 'YOU THOUGHT WE FORGOT? WE NEVER FORGET.'); msg(RIVALS[grudger].short + ' HOLDS A GRUDGE - EXPECT MORE DIRTY TRICKS', rcol(grudger)); }
 }
 
 // ---------------------------------------------------------------- textures (built at 2x detail)
@@ -1411,6 +1425,7 @@ function updateDrill(r, dt) {
     if (mine) {
       const tx = s.x1 + s.ux * s.prog, ty = s.y1 + s.uy * s.prog;
       revealAround(tx, ty, has('seismic') ? 4 : 1);
+      digRelics(tx, ty, 6);
       // remember which of your rigs owns the pipe in each cell; with couplers, meeting another rig's pipe joins them
       const pc = cellIndexAt(tx, ty);
       if (pc >= 0) {
@@ -1567,7 +1582,11 @@ function pumpAll(dt) {
         }
       }
     }
-    if (got > 0) { r.pumping = true; if (mine) r.tank += got * yl; else if (S.rv[r.owner]) S.rv[r.owner].pumped += got; }
+    if (got > 0) {
+      r.pumping = true;
+      if (mine) { const k = r.siphon ? 0.6 : 1; r.tank += got * yl * k; if (r.siphon && S.rv[r.siphon.by]) S.rv[r.siphon.by].pumped += got * (1 - k); }
+      else if (S.rv[r.owner]) S.rv[r.owner].pumped += got;
+    }
   }
   for (const r of myRigs()) {
     r.xfer = false;
@@ -1577,6 +1596,7 @@ function pumpAll(dt) {
   }
 }
 function dock(b) {
+  if (b.kind === 'smug') return [b.x, b.y + 11];
   if (b.kind === 'rig') return [b.x, SURF - 34];
   if (b.kind === 'silo') return [b.x, SURF - 21];
   return [b.x, SURF - 38];
@@ -1595,6 +1615,7 @@ function flyTo(h, tx, ty, dt) {
 // haulers are automatic: each one is assigned a side (0 = HELIX, 1 = NOVA), fetches crude from
 // whichever of your rigs/silos has the most unclaimed crude, and sells it at its side's station
 function sellTarget(h) {
+  if (h.smug && S.smug) return S.smug;
   const own = S.stations[h.side], other = S.stations[1 - h.side];
   if (has('auto') && other.closed <= 0 && (own.closed > 0 || price(other) > price(own) * 1.1)) return other;
   if (own.closed <= 0) return own;
@@ -1637,8 +1658,8 @@ function pullHaulerFrom(side) {
   setSide(pool[0], 1 - side);
 }
 function setSide(h, side) {
-  if (h.side === side) return;
-  h.side = side;
+  if (h.side === side && !h.smug) return;
+  h.side = side; h.smug = false;
   park(h);
   if (h.state === 'toSell' || h.state === 'idle') { h.state = 'idle'; h.target = null; h.think = 0; }
   msg('HAULER NOW SELLS AT ' + S.stations[side].name, P.cyan);
@@ -1696,15 +1717,17 @@ function updateHauler(h, dt) {
         break;
       }
       const u = Math.min(25 * st.hRate() * dt, h.cargo);
-      const v = u * price(s);
+      const v = u * sellPrice(s);
       h.cargo -= u; h.sale += v;
       G.credits += v; G.totalEarned += v; S.stats.revenue += v; S.stats.sold += u;
       s.sat = Math.max(0.45, s.sat - u * 0.0025 * st.satMul());
       soldUnits(u, s);
-      S.stats[s.name === 'HELIX' ? 'helix' : 'nova'] += u;
+      if (s.kind === 'smug') S.stats.smug = (S.stats.smug || 0) + u;
+      else S.stats[s.name === 'HELIX' ? 'helix' : 'nova'] += u;
       if (h.cargo <= 1e-6) {
         h.cargo = 0;
         if (h.sale > 0.5) { float(h.x, h.y - 10, '+$' + fmt(h.sale), P.yellow); sfx('cash'); }
+        if (s.kind === 'smug' && S.smug === s) smugDelivered(h);
         h.sale = 0;
         h.state = 'idle'; h.target = null; h.think = 0; park(h);
       }
@@ -1755,25 +1778,8 @@ function rivalDaily(d) {
     }
     for (const q of R.queue) if (!q.done && d >= q.day) { q.done = true; if (S.plots[q.plot].owner === id) rivalBuild(S.plots[q.plot]); }
     if (d >= R.nextTrick) {
-      R.nextTrick = d + 18 + Math.random() * 12;
-      if (id === 'kroll') {
-        const s = pick(S.stations);
-        s.sat = Math.min(s.sat, 0.6);
-        msg('KROLL DUMPED CRUDE AT ' + s.name + ' - PRICES TANK!', info.col); sfx('alert');
-        taunt(id);
-      } else if (id === 'hex') {
-        const targets = myRigs().filter(r => r.offline <= 0);
-        if (targets.length) {
-          const r = pick(targets);
-          if (isChar('iris')) { msg('HEX TRIED TO SABOTAGE A RIG - IRIS-9 BLOCKED IT', P.lime); taunt(id, 'ERROR. ERROR. UNEXPECTED FIREWALL.'); }
-          else {
-            r.offline = 4; explosion(r.x, SURF - 14, 16); S.shake = 4;
-            const a = activeSeg(r); if (a && a.status === 'drill') { a.status = 'stop'; a.len = a.prog; }
-            msg('HEX CORP SABOTAGED A RIG! OFFLINE 4 DAYS', info.col); sfx('boom');
-            taunt(id);
-          }
-        }
-      }
+      R.nextTrick = d + (18 + Math.random() * 12) / (1 + 0.35 * grudgeOf(id));
+      rivalTrick(id);
     }
   }
   for (const r of S.rigs) {
@@ -1814,18 +1820,6 @@ function rivalDrill(r) {
 }
 
 // ---------------------------------------------------------------- events & days
-function randomEvent() {
-  const roll = Math.random(), s = pick(S.stations);
-  if (roll < 0.25) { s.mult = 1.5; s.multT = 8; msg('FUEL SHORTAGE AT ' + s.name + '! PRICES SOAR FOR 8 DAYS', P.lime); }
-  else if (roll < 0.4) { for (const x of S.stations) { x.mult = 0.7; x.multT = 7; } msg('MARKET CRASH! ALL PRICES DOWN FOR 7 DAYS', P.red); }
-  else if (roll < 0.55) { s.closed = 6; msg('DOCK STRIKE: ' + s.name + ' CLOSED FOR 6 DAYS', P.orange); }
-  else if (roll < 0.7) { S.flare = 6; msg('SOLAR FLARE! HAULERS AT HALF SPEED FOR 6 DAYS', P.orange); }
-  else if (roll < 0.85 && myRigs().length && !isChar('iris')) {
-    const r = pick(myRigs()); r.offline = 4; explosion(r.x, SURF - 14); S.shake = 6;
-    msg('MICROMETEOR STRIKE! A RIG IS OFFLINE FOR 4 DAYS', P.red); sfx('boom'); return;
-  } else { const v = 300 + S.belt * 150; G.credits += v; msg('CONSORTIUM DEVELOPMENT GRANT +$' + v, P.lime); }
-  sfx('alert');
-}
 function quake() {
   S.shake = 10; S.jam = 1;
   sfx('boom');
@@ -1842,6 +1836,7 @@ function daily() {
     s.sat += (1 - s.sat) * 0.1;
     if (s.multT > 0 && --s.multT === 0) s.mult = 1;
     if (s.closed > 0) s.closed--;
+    if (s.bribed > 0) s.bribed--;
   }
   for (const s of S.stations) jobDaily(s, d);
   if (has('reson')) for (const p of S.pockets) if (S.rigs.some(r => r.owner === 'you' && r.pockets.has(p.id))) p.amt = Math.min(p.cap, p.amt + p.cap * 0.015);
@@ -1856,7 +1851,13 @@ function daily() {
   S.abil.wasCd = S.abil.cd > 0;
   for (const r of S.rigs) if (r.offline > 0) r.offline--;
   rivalDaily(d);
-  if (d >= S.nextEvent) { randomEvent(); S.nextEvent = d + 14 + Math.random() * 14; }
+  if (d >= S.nextEvent) { newsEvent(); S.nextEvent = d + 10 + Math.random() * 10; }
+  if (d >= S.nextFlavor) { news(pick(FLAVOR), P.lgray); S.nextFlavor = d + 8 + Math.random() * 8; }
+  wormDaily(d);
+  smugDaily();
+  if (S.rush > 0) S.rush--;
+  if (S.steel > 0) S.steel--;
+  for (const r of myRigs()) if (r.siphon && --r.siphon.days <= 0) { r.siphon = null; msg('THE SIPHON ON RIG #' + r.id + ' RAN DRY AND FELL OFF', P.lgray); }
   if (d === S.days - 10) { msg('10 DAYS LEFT IN THIS SECTOR', P.yellow); sfx('alert'); }
   if (d % 5 === 0) saveSector();
   if (d >= S.days) endSector();
@@ -1920,9 +1921,11 @@ function endSector() {
   if (G.credits < START_FLOOR) { stipend = Math.round(START_FLOOR - Math.max(0, G.credits)); G.credits = START_FLOOR; }
   G.report = { sector: G.sector, name: S.name, revenue: S.stats.revenue, spent: S.stats.spent, sold: S.stats.sold, gas: S.stats.gas,
     fire, crude, rivals: rivalRep, stipend, interest,
-    rank: S.rank, jobs: S.stats.jobs, early: S.early || null, bonuses, bonusTotal, belt: S.belt };
+    rank: S.rank, jobs: S.stats.jobs, early: S.early || null, bonuses, bonusTotal, belt: S.belt, quota: S.quota || 0, tier: S.tier || 0 };
   G.history.push({ s: G.sector, name: S.name, rev: Math.round(S.stats.revenue), sold: Math.round(S.stats.sold), helix: Math.round(S.stats.helix), nova: Math.round(S.stats.nova),
     profit: Math.round(S.stats.revenue + S.stats.gas + fire + bonusTotal - S.stats.spent), rivals: Object.fromEntries(rivalRep.map(r => [r.id, Math.round(r.pumped)])) });
+  for (const id in (G.grudge || {})) G.grudge[id] = G.grudge[id] < 0.4 ? 0 : G.grudge[id] * 0.6;
+  if (S.tut) { G.tutorial = false; META.tutDone = true; saveMeta(); }
   G.sector++;
   save();
   clearSectorSave();
@@ -2067,14 +2070,22 @@ function releaseGlitch(x, y) {
 function updateCritters(dt) {
   for (const c of S.critters) {
     c.t += dt;
-    c.x += c.dir * 16 * dt;
-    c.vy = clamp(c.vy + (Math.random() - 0.5) * 60 * dt, -10, 10);
+    const hunt = wormActive() ? S.worm : null;
+    if (hunt) { c.dir = hunt.x > c.x ? 1 : -1; c.vy = clamp((hunt.y - c.y) * 2, -28, 28); }
+    else c.vy = clamp(c.vy + (Math.random() - 0.5) * 60 * dt, -10, 10);
+    c.x += c.dir * (hunt ? 30 : 16) * dt;
     c.y += c.vy * dt;
     if (c.y < UG_TOP + 6) { c.y = UG_TOP + 6; c.vy = Math.abs(c.vy); }
     if (c.y > UG_BOT - 6) { c.y = UG_BOT - 6; c.vy = -Math.abs(c.vy); }
     if (c.x < 6 || c.x > W - 6) c.dir *= -1;
-    if (Math.random() < 0.004) c.dir *= -1;
+    if (!hunt && Math.random() < 0.004) c.dir *= -1;
     revealAround(c.x, c.y, 2);
+    c.bite = (c.bite || 0) - dt;
+    if (hunt && c.bite <= 0 && Math.hypot(hunt.x - c.x, hunt.y - c.y) < 10) { c.bite = 2.5; c.life -= 4; float(c.x, c.y - 10, 'CHOMP!', P.cyan); wormDamage(1, 'glitch'); }
+    for (const rel of S.relics || []) if (!rel.found && !rel.sniffed && Math.hypot(rel.x - c.x, rel.y - c.y) < 22) {
+      rel.sniffed = true; reveal(rel.c, rel.r); revealAround(rel.x, rel.y, 1);
+      float(c.x, c.y - 8, 'SHINY!', P.yellow); msg('GLITCH FOUND A BURIED RELIC! RUN A PIPE THROUGH IT', P.yellow);
+    }
     if (Math.random() < 0.3) part(c.x - c.dir * 3, c.y + 2, -c.dir * 15, -Math.random() * 15, 0.4, pick(['#8a6352', '#b07a5c', '#5b4038']), 40);
     for (const g of S.gases) {
       if (!g.live || c.sniffed.has(g.id)) continue;
@@ -2175,7 +2186,7 @@ function genMap() {
 }
 
 // ---- rival finances: they hoard cash for stock auctions and spend some on upgrades
-function rivalPumpRate(o) { return (2.8 + 0.3 * beltOf(G.sector)) * (1 + 0.12 * ((G.rtech && G.rtech[o]) || 0)) * DF().rival * (isChar('grane') ? 0.85 : 1); }
+function rivalPumpRate(o) { return (2.8 + 0.3 * beltOf(G.sector)) * (1 + 0.12 * ((G.rtech && G.rtech[o]) || 0)) * DF().rival * (isChar('grane') ? 0.85 : 1) * (1 + 0.08 * ((S && S.tier) || 0)) * (S && S.totem ? 0.75 : 1); }
 function rivalYear(avgBase) {
   const out = [];
   for (const id of RIVAL_IDS) {
@@ -2200,12 +2211,19 @@ function sectorBonuses(crudeLeft) {
   if (S.stats.sold > 0 && crudeLeft < 1) out.push(['EVERY DROP SOLD', base]);
   const myGas = S.gases.filter(g => onMine(g.cells));
   if (myGas.length && myGas.every(g => !g.live)) out.push(['ALL GAS CLEARED', base]);
+  if (S.worm && S.worm.slain) out.push(['VOID WORM SLAIN', Math.round((1500 + 700 * S.belt) * (S.payMul || 1) / 10) * 10]);
   if (S.early && S.early.days > 0) out.push(['EARLY WITHDRAWAL (' + S.early.days + ' DAYS)', Math.round(base * Math.min(1.5, 0.5 + S.early.days / 60) / 10) * 10]);
   return out;
 }
 
 // ---- where the campaign goes after a sector summary
 function afterSummary() {
+  if (G.endless) {
+    if (G.report.quota && G.report.sold < G.report.quota) { endEndless(); return; }
+    G.endless.best = Math.max(G.endless.best || 0, G.report.tier);
+    META.bestDepth = Math.max(META.bestDepth || 0, G.report.tier); saveMeta();
+    ensureEndlessMap(); save(); screen = 'shop'; return;
+  }
   const done = G.report.sector;
   if (done % SECTORS_PER_BELT === 0 && beltOf(done) >= 2) { startStockAuction(beltOf(done), done >= TOTAL_SECTORS); return; }
   screen = 'shop';
@@ -2364,6 +2382,7 @@ function renderStock() {
 let mapSel = null;
 function mapNodeXY(s, k) { const b = beltOf(s) - 1, row = (s - 1) % SECTORS_PER_BELT; return [12 + b * 104 + 26 + k * 50, 82 + row * 52]; }
 function renderMap() {
+  if (G.endless) { renderEndlessMap(); return; }
   starfield(0.3);
   txtS('CAMPAIGN MAP', 320, 6, P.crudeL, 2, 'c');
   txt('SECTOR ' + G.sector + ' OF ' + TOTAL_SECTORS + '  -  ' + DF().name + '  -  PICK A SECTOR, THEN LAUNCH', 320, 24, P.lgray, 1, 'c');
@@ -2375,6 +2394,7 @@ function renderMap() {
     txt('BELT ' + (i + 1), x + 50, 39, b.col, 1, 'c');
     txt(b.name, x + 50, 47, P.white, 1, 'c');
     wrap(b.hazard, 23).forEach((l, k) => txt(l, x + 50, 56 + k * 7, P.gray, 1, 'c'));
+    txt('BOSS', x + 51, 183, P.red, 1, 'c');
     if (SHARE_LOTS[i + 1]) { txt('$ STOCK AUCTION', x + 50, 212, P.yellow, 1, 'c'); txt(SHARE_LOTS[i + 1] + ' SHARES', x + 50, 220, P.gray, 1, 'c'); }
   });
   // chosen path
@@ -2418,6 +2438,7 @@ function renderMap() {
     const y = 254 + j * 22;
     drawPortrait(RIVALS[id].look, 436, y, 1);
     txt(RIVALS[id].short, 456, y + 1, rcol(id));
+    if (grudgeOf(id) >= 1) txt('GRUDGE', 462 + tw(RIVALS[id].short), y + 1, P.red);
     txt(G.rshares[id] + ' SH', 622, y + 1, rcol(id), 1, 'r');
     txt('$' + fmt(G.rcash[id]) + '  TECH ' + G.rtech[id].toFixed(1), 456, y + 9, P.gray);
   });
@@ -2532,7 +2553,7 @@ function hasSectorSave() { try { return !!localStorage.getItem(SECTOR_KEY); } ca
 function clearSectorSave() { try { localStorage.removeItem(SECTOR_KEY); } catch (e) { } }
 function saveSector() {
   if (!S || screen !== 'play') return;
-  const ref = o => o ? { kind: o.kind, id: o.kind === 'station' ? S.stations.indexOf(o) : o.id } : null;
+  const ref = o => o ? { kind: o.kind, id: o.kind === 'station' ? S.stations.indexOf(o) : o.kind === 'smug' ? 0 : o.id } : null;
   const data = {
     v: 1,
     s: {
@@ -2542,9 +2563,11 @@ function saveSector() {
       grid: Array.from(S.grid), pid: Array.from(S.pid), rev: Array.from(S.rev), pcell: Array.from(S.pcell), joints: S.joints,
       pockets: S.pockets, gases: S.gases, plots: S.plots, segs: S.segs.map(s => ({ ...s, drawn: 0, capped: false })),
       rigs: S.rigs.map(r => ({ id: r.id, kind: r.kind, x: r.x, owner: r.owner, tank: r.tank, pockets: [...r.pockets], segs: r.segs, offline: r.offline,
-        tries: r.tries || 0, tried: r.tried ? [...r.tried] : [], nextTry: r.nextTry || 0, links: r.links ? [...r.links].map(o => o.id) : [] })),
+        tries: r.tries || 0, tried: r.tried ? [...r.tried] : [], nextTry: r.nextTry || 0, siphon: r.siphon || null, links: r.links ? [...r.links].map(o => o.id) : [] })),
       silos: S.silos.map(x => ({ kind: 'silo', id: x.id, x: x.x, tank: x.tank })),
       haulers: S.haulers.map(h => ({ ...h, target: ref(h.target) })),
+      relics: S.relics || [], relicQ: S.relicQ || [], worm: S.worm || null, smug: S.smug || null, nextSmug: S.nextSmug || 0, nextFlavor: S.nextFlavor || 0,
+      rush: S.rush || 0, steel: S.steel || 0, totem: !!S.totem, tier: S.tier || 0, quota: S.quota || 0, tut: S.tut || null,
       stations: S.stations, scans: S.scans.filter(sc => sc.done).map(sc => ({ x: sc.x, done: true, t: 1, dur: 1, rx: sc.rx, ry: sc.ry })),
     },
     g: G,
@@ -2561,13 +2584,14 @@ function loadSector() {
     ...d, rng: mulberry32((Math.random() * 1e9) | 0), speed: 1, paused: true, help: false, shake: 0,
     grid: Uint8Array.from(d.grid), pid: Int16Array.from(d.pid), rev: Uint8Array.from(d.rev), pcell: Int32Array.from(d.pcell),
     parts: [], floats: [], msgs: [], sel: null, tool: null, drag: null, auction: null, auctionQueue: [], critters: [],
-    choice: null, taunt: null, bm: false, twinkles: [],
+    choice: null, taunt: null, bm: false, twinkles: [], drones: [], newsQ: [], news: null,
   };
   S.rigs = d.rigs.map(r => ({ ...r, pockets: new Set(r.pockets), tried: new Set(r.tried), links: new Set(), dead: false }));
   for (const r of S.rigs) r.links = new Set(d.rigs.find(x => x.id === r.id).links.map(id => S.rigs.find(o => o.id === id)).filter(Boolean));
   S.silos = d.silos.map(x => ({ ...x, dead: false }));
-  const deref = t => !t ? null : t.kind === 'station' ? S.stations[t.id] : t.kind === 'silo' ? S.silos.find(x => x.id === t.id) : S.rigs.find(x => x.id === t.id);
+  const deref = t => !t ? null : t.kind === 'smug' ? S.smug : t.kind === 'station' ? S.stations[t.id] : t.kind === 'silo' ? S.silos.find(x => x.id === t.id) : S.rigs.find(x => x.id === t.id);
   S.haulers = d.haulers.map(h => ({ ...h, target: deref(h.target) }));
+  for (const h of S.haulers) if (!h.target && h.state !== 'idle') h.state = 'idle';
   relink();
   buildDirt(); buildFog(); buildSky(); buildPipeLayer();
   for (let i = 0; i < S.rev.length; i++) if (S.rev[i]) S.fogX.clearRect(i % COLS, (i / COLS) | 0, 1, 1);
@@ -2662,7 +2686,7 @@ function renderStats() {
     const mx = Math.max(1, ...hst.map(h => Math.abs(h.profit)));
     const bw = Math.min(20, Math.floor(370 / TOTAL_SECTORS)), base = 110;
     rect(20, base, 380, 1, P.gray);
-    hst.forEach((h, i) => {
+    hst.slice(-18).forEach((h, i) => {
       const hgt = Math.round(Math.abs(h.profit) / mx * 60), x = 22 + i * (bw + 1);
       rect(x, h.profit >= 0 ? base - hgt : base + 1, bw - 1, hgt, h.profit >= 0 ? P.green : P.red);
       txt('' + h.s, x + bw / 2, 175 - 2, P.gray, 1, 'c');
@@ -2676,7 +2700,7 @@ function renderStats() {
     const cm = Math.max(1, ...hst.flatMap(h => series.map(s2 => s2[2](h))));
     for (const [id, col, f] of series) {
       let prev = null;
-      hst.forEach((h, i) => {
+      hst.slice(-18).forEach((h, i) => {
         const x = 30 + i * 21, y = 312 - Math.round(f(h) / cm * 100);
         if (prev) { const n = Math.max(Math.abs(x - prev[0]), Math.abs(y - prev[1])); for (let t = 0; t <= n; t++) rect(Math.round(prev[0] + (x - prev[0]) * t / n), Math.round(prev[1] + (y - prev[1]) * t / n), 1, 1, col); }
         rect(x - 1, y - 1, 3, 3, col);
@@ -2703,6 +2727,627 @@ function renderStats() {
   button(10, 334, 140, 16, '< BACK', () => { screen = TS.statsBack || 'shop'; sfx('click'); }, { color: P.dgray });
 }
 
+// ---------------------------------------------------------------- buried relics: pipes and blasts dig them up - sell or keep
+const RELICS = [
+  { id: 'idol', name: 'VOID IDOL', keep: '+15% SELL PRICE THIS SECTOR', col: '#ffcd75', perk: 'price' },
+  { id: 'drill', name: 'ANCIENT DRILLHEAD', keep: '+60% DRILL SPEED THIS SECTOR', col: '#ef7d57', perk: 'drill' },
+  { id: 'lens', name: 'GRAVITY LENS', keep: '+35% HAULER SPEED THIS SECTOR', col: '#73eff7', perk: 'burn' },
+  { id: 'pump', name: 'PRECURSOR PUMP', keep: '+40% PUMP RATE THIS SECTOR', col: '#d77bff', perk: 'pump' },
+  { id: 'chart', name: 'STAR CHART', keep: 'REVEALS THE 2 RICHEST HIDDEN POCKETS', col: '#a7f070', perk: 'prospect' },
+  { id: 'cell', name: 'ZERO-POINT CELL', keep: '+3 ROCK BLASTER CHARGES', col: '#f4f4f4' },
+  { id: 'totem', name: 'DREAD TOTEM', keep: 'RIVAL RIGS PUMP 25% SLOWER THIS SECTOR', col: '#ff5ca8' },
+];
+function relicValue(belt, rng) { return Math.round((500 + 250 * belt) * (0.8 + rng() * 0.6) / 10) * 10; }
+function placeRelics(rng) {
+  S.relics = [];
+  const n = 2 + (S.belt >= 3 ? 1 : 0) + (rng() < 0.5 ? 1 : 0);
+  for (let tries = 0; tries < 200 && S.relics.length < n; tries++) {
+    const c = 4 + Math.floor(rng() * (COLS - 8)), r = 6 + Math.floor(rng() * (ROWS - 9)), i = r * COLS + c;
+    if (S.grid[i] !== T_DIRT || nearType(i, T_OIL) || S.relics.some(o => Math.abs(o.c - c) + Math.abs(o.r - r) < 20)) continue;
+    const t = RELICS[Math.floor(rng() * RELICS.length)];
+    S.relics.push({ c, r, x: c * CELL + 2, y: UG_TOP + r * CELL + 2, type: t.id, value: relicValue(S.belt, rng), found: false });
+  }
+}
+function digRelics(x, y, rad) {
+  for (const rel of S.relics || []) if (!rel.found && Math.hypot(rel.x - x, rel.y - y) <= rad) foundRelic(rel);
+}
+function foundRelic(rel) {
+  rel.found = true;
+  (S.relicQ ||= []).push(rel);
+  float(rel.x, rel.y - 8, 'RELIC!', P.yellow);
+  for (let k = 0; k < 18; k++) part(rel.x, rel.y, (Math.random() - 0.5) * 50, -Math.random() * 50, 0.8, pick([P.yellow, P.white, RELICS.find(t => t.id === rel.type).col]), 30, 1, true);
+  sfx('fanfare');
+  S.tool = null; S.drag = null;
+}
+function resolveRelic(keep) {
+  const rel = S.relicQ.shift(), t = RELICS.find(x => x.id === rel.type);
+  G.life.relics = (G.life.relics || 0) + 1;
+  if (!keep) {
+    G.credits += rel.value; G.totalEarned += rel.value; S.stats.revenue += rel.value;
+    msg('SOLD THE ' + t.name + ' TO THE COLLECTOR +$' + fmt(rel.value), P.yellow); sfx('cash');
+    return;
+  }
+  if (t.perk) applyPerk(PERKS.find(p => p.id === t.perk));
+  else if (t.id === 'cell') S.blasts += 3;
+  else if (t.id === 'totem') { S.totem = true; for (const id of S.rivals) taunt(id, 'WHAT IS THAT HORRIBLE THING YOU DUG UP?'); }
+  msg('KEPT THE ' + t.name + ': ' + t.keep, t.col); sfx('buy');
+}
+function drawRelicSprite(x, y, type, s = 1) {
+  const t = RELICS.find(r => r.id === type), X = Math.round(x * R), Y = Math.round(y * R), k = 2 * s;
+  q(X - 3 * k, Y - 3 * k, 6 * k, 6 * k, '#05060c');
+  q(X - 2 * k, Y - 3 * k, 4 * k, 6 * k, t.col); q(X - 3 * k, Y - 2 * k, 6 * k, 4 * k, t.col);
+  q(X - 2 * k, Y - 2 * k, 2 * k, k, '#ffffff'); q(X + k, Y + k, k, k, shade(t.col, -0.45));
+  q(X - k / 2, Y - k / 2, k, k, '#1a1c2c');
+}
+function drawRelics() {
+  for (const rel of S.relics || []) {
+    if (rel.found || !S.rev[rel.r * COLS + rel.c]) continue;
+    drawRelicSprite(rel.x, rel.y, rel.type);
+    glow(rel.x, rel.y, 7, RELICS.find(t => t.id === rel.type).col, 0.35 + 0.2 * Math.sin(GT * 4 + rel.c));
+    if (((GT * 2 + rel.c) | 0) % 5 === 0) q(Math.round(rel.x * R) + 4, Math.round(rel.y * R) - 8, 2, 2, '#ffffff');
+  }
+}
+function drawRelicPick() {
+  const rel = S.relicQ[0], t = RELICS.find(x => x.id === rel.type);
+  rect(0, 0, W, H, 'rgba(5,5,15,0.75)');
+  const w = 300, h = 132, x = (W - w) / 2, y = 100;
+  panel(x, y, w, h, P.navy, P.yellow);
+  txtS('RELIC UNEARTHED!', W / 2, y + 8, P.yellow, 2, 'c');
+  drawRelicSprite(W / 2, y + 42, rel.type, 2);
+  glow(W / 2, y + 42, 18, t.col, 0.4);
+  txtS(t.name, W / 2, y + 60, t.col, 1, 'c');
+  txt('SELL IT TO THE CANTINA COLLECTOR, OR KEEP ITS POWER', W / 2, y + 72, P.lgray, 1, 'c');
+  button(x + 12, y + 88, 134, 30, '', () => resolveRelic(false), { color: '#4a3a10', hc: P.yellow });
+  txt('[1] SELL', x + 79, y + 93, P.white, 1, 'c'); txtS('+$' + fmt(rel.value), x + 79, y + 104, P.yellow, 1, 'c');
+  button(x + w - 146, y + 88, 134, 30, '', () => resolveRelic(true), { color: P.plum, hc: P.crude });
+  txt('[2] KEEP', x + w - 79, y + 93, P.white, 1, 'c');
+  wrap(t.keep, 32).forEach((l, i) => txt(l, x + w - 79, y + 102 + i * 8, P.crudeG, 1, 'c'));
+}
+
+// ---------------------------------------------------------------- the Void Worm: a boss at the end of every belt
+function scheduleWorm(rng) {
+  if (G.sector % SECTORS_PER_BELT !== 0) return;
+  const tier = S.belt + (S.tier || 0);
+  S.worm = { state: 'wait', day: 22 + Math.floor(rng() * 12), hp: 0, max: 4 + 2 * tier, tier, x: 0, y: 0, ang: 0, t: 0, trail: [], target: null, retarget: 0, eatCd: 0, stun: 0, left: 0, warned: false, slain: false, ate: 0, hit: 0 };
+}
+function wormActive() { return !!(S && S.worm && S.worm.state === 'active'); }
+function wormDaily(d) {
+  const w = S.worm;
+  if (!w) return;
+  if (w.state === 'wait') {
+    if (!w.warned && d >= w.day - 3) { w.warned = true; news('SEISMOLOGISTS REPORT SOMETHING ENORMOUS BURROWING TOWARD ' + S.name, P.red); msg('TREMORS... SOMETHING HUGE IS COMING. SAVE A BLAST OR TWO', P.orange); sfx('alert'); S.shake = 4; }
+    if (d >= w.day) {
+      const left = Math.random() < 0.5;
+      Object.assign(w, { state: 'active', hp: w.max, x: left ? 6 : W - 6, y: UG_TOP + 60 + Math.random() * 120, ang: left ? 0 : Math.PI, left: 22, trail: [] });
+      msg('THE VOID WORM HAS ARRIVED! BLAST ITS HEAD [5] OR SIC GLITCH [7] ON IT', P.red);
+      sfx('boom'); S.shake = 12;
+    }
+  } else if (w.state === 'active' && --w.left <= 0) {
+    w.state = 'gone';
+    msg('THE VOID WORM BURROWED AWAY, FAT ON PIPE', P.lgray);
+  }
+}
+function wormTarget(w) {
+  const pts = [];
+  for (const s of S.segs) {
+    if (s.status === 'gone' || s.status === 'queued' || s.prog < 4) continue;
+    const t = 2 + Math.random() * (s.prog - 2);
+    pts.push({ x: s.x1 + s.ux * t, y: s.y1 + s.uy * t, mine: s.owner === 'you' });
+  }
+  const mine = pts.filter(p => p.mine);
+  if (mine.length && Math.random() < 0.75) return pick(mine);
+  if (pts.length && Math.random() < 0.6) return pick(pts);
+  return { x: 20 + Math.random() * (W - 40), y: UG_TOP + 20 + Math.random() * (ROWS * CELL - 40) };
+}
+// a bite severs the pipe; everything downstream of the bite is lost
+function cutSeg(seg, t) {
+  t = Math.max(0, t - 2);
+  seg.prog = t; seg.len = t; seg.status = t > 0.5 ? 'stop' : 'gone';
+  let bridge = !!seg.bridge && seg.status === 'gone';
+  const walk = (pid, cut) => {
+    for (const s of S.segs) if (s.parent === pid && s.status !== 'gone' && (cut == null || s.tPar > cut - 0.01)) { s.status = 'gone'; if (s.bridge) bridge = true; walk(s.id, null); }
+  };
+  walk(seg.id, t);
+  const r = S.rigs.find(x => x.id === seg.rig);
+  if (r) {
+    for (const pid of [...r.pockets]) if (!pipeTouches(r, new Set(S.pockets[pid].cells))) r.pockets.delete(pid);
+    if (bridge && r.links) { for (const o of r.links) o.links.delete(r); r.links.clear(); }
+    if (r.owner === 'you') { // rebuild which cells this rig's pipe occupies (couplers use it)
+      for (let i = 0; i < S.pcell.length; i++) if (S.pcell[i] === r.id) S.pcell[i] = 0;
+      for (const id of r.segs) { const s = S.segs[id]; if (s.status === 'gone') continue; for (let t2 = 0; t2 <= s.prog; t2 += 1) { const ci = cellIndexAt(s.x1 + s.ux * t2, s.y1 + s.uy * t2); if (ci >= 0 && !S.pcell[ci]) S.pcell[ci] = r.id; } }
+    }
+  }
+  S.pipeReset = true;
+  return r;
+}
+function wormEat(w) {
+  let best = null, bd = 4.5;
+  for (const s of S.segs) {
+    if (s.status === 'gone' || s.status === 'queued' || s.prog <= 0) continue;
+    const t = clamp((w.x - s.x1) * s.ux + (w.y - s.y1) * s.uy, 0, s.prog);
+    const d = Math.hypot(s.x1 + s.ux * t - w.x, s.y1 + s.uy * t - w.y);
+    if (d < bd) { bd = d; best = { s, t }; }
+  }
+  if (!best) return;
+  const r = cutSeg(best.s, best.t);
+  w.eatCd = 1.4; w.ate++;
+  float(w.x, w.y - 10, 'CHOMP!', P.red);
+  for (let k = 0; k < 10; k++) part(w.x, w.y, (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 40, 0.5, pick(['#8b9bc0', '#3a4560', '#e9a8ff']), 30);
+  if (r && r.owner === 'you') { msg('THE VOID WORM CHEWED THROUGH RIG #' + r.id + "'S PIPE!", P.red); sfx('thud'); S.shake = 3; }
+}
+function updateWorm(dt) {
+  const w = S.worm;
+  if (!w || w.state !== 'active') return;
+  w.t += dt; w.hit = Math.max(0, w.hit - dt);
+  if (w.stun > 0) { w.stun -= dt; return; }
+  w.retarget -= dt;
+  if (!w.target || w.retarget <= 0 || Math.hypot(w.target.x - w.x, w.target.y - w.y) < 5) { w.target = wormTarget(w); w.retarget = 7; }
+  let diff = Math.atan2(w.target.y - w.y, w.target.x - w.x) - w.ang;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  w.ang += clamp(diff, -1.8 * dt, 1.8 * dt);
+  const a = w.ang + 0.4 * Math.sin(w.t * 4), sp = 17 + 2 * w.tier;
+  w.x += Math.cos(a) * sp * dt; w.y += Math.sin(a) * sp * dt;
+  if (w.x < 4 || w.x > W - 4) { w.x = clamp(w.x, 4, W - 4); w.ang = Math.PI - w.ang; }
+  if (w.y < UG_TOP + 6 || w.y > UG_BOT - 6) { w.y = clamp(w.y, UG_TOP + 6, UG_BOT - 6); w.ang = -w.ang; }
+  const h0 = w.trail[0];
+  if (!h0 || Math.hypot(h0.x - w.x, h0.y - w.y) >= 1.5) { w.trail.unshift({ x: w.x, y: w.y }); if (w.trail.length > 70) w.trail.pop(); }
+  revealAround(w.x, w.y, 2);
+  if (Math.random() < 0.25) part(w.x, w.y, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, 0.5, pick(['#8a6352', '#5b4038', '#3a1450']), 20);
+  w.eatCd -= dt;
+  if (w.eatCd <= 0) wormEat(w);
+}
+function wormDamage(n, by) {
+  const w = S.worm;
+  if (!wormActive()) return;
+  w.hp -= n; w.hit = 0.4; w.stun = Math.max(w.stun, 1.2);
+  float(w.x, w.y - 14, '-' + n, by === 'glitch' ? P.cyan : P.orange);
+  if (w.hp > 0) { if (Sound.sfx) Sound.tone(110, 0.25, 'sawtooth', 0.08, 0, 50); return; }
+  w.state = 'dead'; w.slain = true;
+  for (let k = 0; k < w.trail.length; k += 6) explosion(w.trail[k].x, w.trail[k].y, 10);
+  S.shake = 14; sfx('boom');
+  msg('THE VOID WORM IS SLAIN! BOUNTY PAID AT THE END OF THE SECTOR', P.lime);
+  gainXP(80);
+  // it coughs up something shiny
+  const t = RELICS[Math.floor(Math.random() * RELICS.length)];
+  const rel = { c: 0, r: 0, x: w.x, y: w.y, type: t.id, value: relicValue(S.belt, Math.random) * 2, found: false };
+  (S.relics ||= []).push(rel);
+  foundRelic(rel);
+}
+function wormBlast(x, y, rad) {
+  const w = S.worm;
+  if (!wormActive()) return;
+  if (Math.hypot(w.x - x, w.y - y) <= rad + 6) { wormDamage(3, 'blast'); return; }
+  if (w.trail.slice(0, 50).some(p => Math.hypot(p.x - x, p.y - y) <= rad + 4)) wormDamage(1, 'blast');
+}
+function disc(x, y, r, col) {
+  const X = Math.round(x * R), Y = Math.round(y * R), rr = Math.round(r * R);
+  for (let dy = -rr; dy <= rr; dy++) { const w = Math.round(Math.sqrt(rr * rr - dy * dy)); q(X - w, Y + dy, w * 2 + 1, 1, col); }
+}
+function drawWorm() {
+  const w = S.worm;
+  if (!w || w.state !== 'active') return;
+  const segs = [];
+  for (let k = 0; k < w.trail.length; k += 4) segs.push(w.trail[k]);
+  const n = segs.length, flash = w.hit > 0 && blink();
+  for (let i = n - 1; i >= 1; i--) {
+    const p = segs[i], r = 5 - 3 * (i / n);
+    disc(p.x, p.y, r + 0.5, '#05060c');
+    disc(p.x, p.y, r, flash ? '#ffffff' : i % 2 ? '#3a1450' : '#4a1a66');
+    disc(p.x - r * 0.3, p.y - r * 0.3, r * 0.4, flash ? '#ffffff' : '#7e2bb0');
+    if (i % 3 === 0) glow(p.x, p.y, r + 3, '#c46cff', 0.25);
+  }
+  // head
+  const ca = Math.cos(w.ang), sa = Math.sin(w.ang), open = Math.sin(w.t * 9) > 0;
+  disc(w.x, w.y, 6.5, '#05060c');
+  disc(w.x, w.y, 6, flash ? '#ffffff' : '#5d1a7a');
+  disc(w.x + ca * 3, w.y + sa * 3, open ? 3 : 2, '#1a0410');
+  for (const s2 of [-1, 1]) {
+    const ex = w.x - ca * 1 - sa * 3 * s2, ey = w.y - sa * 1 + ca * 3 * s2;
+    q(Math.round(ex * R) - 1, Math.round(ey * R) - 1, 3, 3, '#ff5a6a');
+    glow(ex, ey, 4, '#ff5a6a', 0.7);
+    const tx = w.x + ca * 5 - sa * 2 * s2, ty = w.y + sa * 5 + ca * 2 * s2;
+    q(Math.round(tx * R), Math.round(ty * R), 2, 2, '#f4f4f4');
+  }
+  glow(w.x, w.y, 14, '#ff3c6a', 0.25 + 0.1 * Math.sin(w.t * 5));
+  // health bar
+  const bw = 40, bx = Math.round(w.x - bw / 2), by = Math.round(clamp(w.y - 16, UG_TOP + 2, UG_BOT - 10));
+  rect(bx - 1, by - 1, bw + 2, 5, '#05060c');
+  rect(bx, by, Math.round(bw * w.hp / w.max), 3, P.red);
+  txtS('VOID WORM', w.x, by - 9, P.red, 1, 'c');
+}
+
+// ---------------------------------------------------------------- rival dirty tricks (and grudges)
+const TRICKS = { syn: ['siphon', 'bribe'], kroll: ['dump', 'bribe'], hex: ['sabotage', 'drone', 'siphon'] };
+function grudgeOf(id) { return (G.grudge && G.grudge[id]) || 0; }
+function addGrudge(id, n) { G.grudge = G.grudge || {}; G.grudge[id] = grudgeOf(id) + n; }
+function rivalTrick(id) {
+  const info = RIVALS[id];
+  const ok = {
+    dump: () => true,
+    bribe: () => S.stations.some(s => !(s.bribed > 0)),
+    sabotage: () => myRigs().some(r => r.offline <= 0),
+    siphon: () => myRigs().some(r => r.pockets.size && !r.siphon),
+    drone: () => S.haulers.length > 0,
+  };
+  const opts = TRICKS[id].filter(t => ok[t]());
+  if (!opts.length) return;
+  const t = pick(opts);
+  if (t === 'dump') {
+    const s = pick(S.stations);
+    s.sat = Math.min(s.sat, 0.6);
+    msg('KROLL DUMPED CRUDE AT ' + s.name + ' - PRICES TANK!', info.col); sfx('alert');
+    taunt(id);
+  } else if (t === 'sabotage') {
+    const r = pick(myRigs().filter(r => r.offline <= 0));
+    if (isChar('iris')) { msg('HEX TRIED TO SABOTAGE A RIG - IRIS-9 BLOCKED IT', P.lime); taunt(id, 'ERROR. ERROR. UNEXPECTED FIREWALL.'); return; }
+    r.offline = 4; explosion(r.x, SURF - 14, 16); S.shake = 4;
+    const a = activeSeg(r); if (a && a.status === 'drill') { a.status = 'stop'; a.len = a.prog; }
+    msg('HEX CORP SABOTAGED A RIG! OFFLINE 4 DAYS', info.col); sfx('boom');
+    taunt(id);
+  } else if (t === 'bribe') {
+    const s = pick(S.stations.filter(s => !(s.bribed > 0)));
+    s.bribed = 7;
+    msg(info.short + ' BRIBED ' + s.name + ' - IT PAYS YOU 25% LESS FOR 7 DAYS', info.col); sfx('alert');
+    taunt(id, 'THE DOCKMASTER LIKES US BETTER.');
+  } else if (t === 'siphon') {
+    const r = pick(myRigs().filter(r => r.pockets.size && !r.siphon));
+    r.siphon = { by: id, days: 8 };
+    msg(info.short + ' TAPPED A SIPHON INTO RIG #' + r.id + '! CLICK THE RIG TO RIP IT OUT', info.col); sfx('alert');
+    taunt(id, id === 'hex' ? 'WE ARE IN YOUR PIPES.' : 'YOUR CRUDE, OUR TANKS. FAMILY RULES.');
+  } else if (t === 'drone') {
+    const left = Math.random() < 0.5;
+    (S.drones ||= []).push({ x: left ? -8 : W + 8, y: 30, owner: id, life: 30, flee: false, t: 0 });
+    msg('HEX LAUNCHED A RAIDER DRONE AT YOUR HAULERS - CLICK IT TO SHOOT IT DOWN', info.col); sfx('alert');
+    taunt(id, 'TARGET ACQUIRED. CARGO RECLASSIFIED AS OURS.');
+  }
+}
+function ripSiphon(r) {
+  const by = r.siphon.by;
+  r.siphon = null;
+  msg('SIPHON RIPPED OUT OF RIG #' + r.id + '!', P.lime);
+  float(r.x, SURF - 40, 'RIPPED!', P.lime);
+  sfx('thud'); gainXP(10); addGrudge(by, 0.5);
+  taunt(by, 'THAT WAS A PERFECTLY GOOD SIPHON.');
+}
+function droneAt(x, y) { return (S.drones || []).find(d => !d.flee && Math.hypot(d.x - x, d.y - y) < 9); }
+function shootDrone(d) {
+  const v = 100 * S.belt;
+  d.dead = true;
+  explosion(d.x, d.y, 18); sfx('boom');
+  G.credits += v; G.totalEarned += v;
+  float(d.x, d.y - 8, '+$' + v, P.yellow);
+  msg('RAIDER DRONE SHOT DOWN! SALVAGE +$' + v, P.lime);
+  addGrudge(d.owner, 0.5);
+}
+function updateDrones(dt) {
+  if (!S.drones || !S.drones.length) return;
+  for (const d of S.drones) {
+    d.t += dt; d.life -= dt;
+    if (d.life <= 0) d.flee = true;
+    if (d.flee) { d.y -= 30 * dt; d.x += (d.x < 320 ? -1 : 1) * 40 * dt; if (d.y < -10 || d.x < -20 || d.x > W + 20) d.dead = true; continue; }
+    let tgt = null, best = 4;
+    for (const h of S.haulers) if (h.cargo > best) { best = h.cargo; tgt = h; }
+    const tx = tgt ? tgt.x : 320 + Math.sin(d.t) * 100, ty = tgt ? tgt.y - 2 : 30;
+    const dx = tx - d.x, dy = ty - d.y, dist = Math.hypot(dx, dy), sp = 46 * dt;
+    if (dist > 0.5) { d.x += dx / dist * Math.min(sp, dist); d.y += dy / dist * Math.min(sp, dist); }
+    if (tgt && dist < 6) {
+      const u = tgt.cargo * 0.5;
+      tgt.cargo -= u;
+      if (S.rv[d.owner]) S.rv[d.owner].pumped += u;
+      float(tgt.x, tgt.y - 10, '-' + fmt(u) + 'U STOLEN', P.red);
+      msg('A RAIDER DRONE STOLE ' + fmt(u) + ' UNITS FROM A HAULER!', P.red); sfx('err');
+      d.flee = true;
+    }
+    if (Math.random() < 0.3) part(d.x, d.y + 3, (Math.random() - 0.5) * 10, 15, 0.3, rcol(d.owner), 0, 1, true);
+  }
+  S.drones = S.drones.filter(d => !d.dead);
+}
+function drawDrones() {
+  for (const d of S.drones || []) {
+    const X = Math.round(d.x * R), Y = Math.round(d.y * R), c = rcol(d.owner);
+    q(X - 7, Y - 3, 14, 6, '#05060c'); q(X - 6, Y - 2, 12, 4, c); q(X - 6, Y - 2, 12, 1, shade(c, 0.4));
+    q(X - 2, Y - 1, 4, 3, '#1a1c2c'); q(X - 1, Y, 2, 1, blink() ? '#ff5a6a' : '#7a1020');
+    const sp = ((GT * 20) | 0) % 2 ? 10 : 6;
+    q(X - 8 - sp / 2, Y - 5, sp, 1, P.lgray); q(X + 8 - sp / 2, Y - 5, sp, 1, P.lgray);
+    q(X - 8, Y - 4, 1, 2, P.gray); q(X + 7, Y - 4, 1, 2, P.gray);
+    glow(d.x, d.y, 8, '#ff5a6a', 0.3);
+    if (!d.flee && blink()) txtS('RAIDER', d.x, d.y - 12, c, 1, 'c');
+  }
+}
+function drawSiphons() {
+  for (const r of myRigs()) {
+    if (!r.siphon) continue;
+    const c = rcol(r.siphon.by), X = Math.round(r.x * R), Y = SURF * R;
+    // a crude rival hose clamped onto the rig, leaking off to the side
+    for (let k = 0; k < 14; k++) q(X + 8 + k * 2, Y - 6 + Math.round(Math.sin(k * 0.8 + GT * 6)), 2, 3, c);
+    q(X + 4, Y - 9, 6, 7, '#05060c'); q(X + 5, Y - 8, 4, 5, c);
+    if (blink()) txtS('SIPHON!', r.x, SURF - 40, c, 1, 'c');
+  }
+}
+
+// ---------------------------------------------------------------- VNN news ticker
+const FLAVOR = [
+  'LOCAL MINER FINDS ROCK SHAPED LIKE A SLIGHTLY DIFFERENT ROCK',
+  'GLITCH SIGHTINGS UP 300% - EXPERTS BAFFLED, ALSO CHARMED',
+  'CONSORTIUM CEO DENIES EXISTENCE OF VOID WORMS. AGAIN',
+  'KROLL MINING VOTED "LEAST TRUSTED BRAND" FOR 9TH STRAIGHT YEAR',
+  'HEX CORP DENIES EVERYTHING. ALSO NOTHING',
+  'SYNDICATE OPENS ORPHANAGE. ALSO A CASINO. SAME BUILDING',
+  'CANTINA BOT MOXIE ELECTED SECTOR DOGCATCHER IN LANDSLIDE',
+  'STUDY: VOIDCRUDE "PROBABLY FINE" TO DRINK, SAYS STUDY FUNDED BY VOIDCRUDE',
+  'HAULER PILOTS STRIKE OVER LACK OF CUPHOLDERS',
+  'ASTEROID ACCIDENTALLY RENAMED AFTER INTERN',
+  'OLD ZEKE CLAIMS HE "SAW A RELIC WINK AT HIM"',
+  'SMUGGLING AT ALL-TIME HIGH, SAY SMUGGLERS PROUDLY',
+];
+function news(text, color = P.white) {
+  if (!S) return;
+  (S.newsQ ||= []).push({ text, color });
+  if (!S.news) nextNews();
+}
+function nextNews() {
+  const n = S.newsQ.shift();
+  S.news = n ? { ...n, t: GT } : null;
+}
+function newsEvent() {
+  const s = pick(S.stations), sh = RIVALS;
+  const ev = [
+    ['shortage', 1, () => { s.mult = 1.5; s.multT = 8; return ['FUEL SHORTAGE AT ' + s.name + '! PRICES SOAR FOR 8 DAYS', P.lime]; }],
+    ['double', 0.7, () => { s.mult = 2; s.multT = 2; return [s.name + ' BUYS AT DOUBLE FOR 2 DAYS - HAUL FAST!', P.lime]; }],
+    ['glut', 1, () => { for (const x of S.stations) { x.mult = 0.7; x.multT = 6; } return ['CRUDE GLUT! ALL PRICES -30% FOR 6 DAYS', P.red]; }],
+    ['strike', 0.8, () => { s.closed = 6; return ['DOCK STRIKE: ' + s.name + ' CLOSED FOR 6 DAYS', P.orange]; }],
+    ['flare', 0.8, () => { S.flare = 6; return ['SOLAR FLARE! HAULERS AT HALF SPEED FOR 6 DAYS', P.orange]; }],
+    ['meteor', 0.7, () => {
+      if (!myRigs().length || isChar('iris')) return null;
+      const r = pick(myRigs()); r.offline = 4; explosion(r.x, SURF - 14); S.shake = 6; sfx('boom');
+      return ['MICROMETEOR STRIKE! RIG #' + r.id + ' OFFLINE FOR 4 DAYS', P.red];
+    }],
+    ['grant', 0.8, () => { const v = 300 + S.belt * 150; G.credits += v; return ['CONSORTIUM DEVELOPMENT GRANT: +$' + v, P.lime]; }],
+    ['union', 0.8, () => { S.rush = 4; return ['HAULER UNION BONUS WEEK: HAULERS +50% SPEED FOR 4 DAYS', P.lime]; }],
+    ['steel', 0.8, () => { S.steel = 5; return ['PIPE STEEL FIRE SALE: DRILLING COSTS HALF FOR 5 DAYS', P.lime]; }],
+    ['leak', 0.7, () => {
+      const p = S.pockets.filter(p => p.amt > 0 && p.cells.some(i => !S.rev[i])).sort((a, b) => b.amt - a.amt)[0];
+      if (!p) return null;
+      revealPocket(p); float(p.cx, p.cy - 8, 'LEAKED!', P.crudeG);
+      return ['SURVEY LEAK: GEOLOGISTS BLAB ABOUT A RICH POCKET', P.crudeL];
+    }],
+    ['scandal', 0.7, () => {
+      const ids = S.rivals.filter(id => S.rigs.some(r => r.owner === id));
+      if (!ids.length) return null;
+      const id = pick(ids);
+      for (const r of S.rigs) if (r.owner === id) r.offline = Math.max(r.offline, 4);
+      return [sh[id].boss + ' ARRESTED! ' + sh[id].short + ' RIGS IDLE FOR 4 DAYS', P.lime];
+    }],
+    ['smuggler', 0.9, () => spawnSmuggler() ? ['SMUGGLER SIGHTED OVER ' + S.name + ' - PAYS DOUBLE, NO QUESTIONS', P.orange] : null],
+  ];
+  for (let tries = 0; tries < 8; tries++) {
+    const tot = ev.reduce((a, e) => a + e[1], 0);
+    let roll = Math.random() * tot, k = 0;
+    while (roll >= ev[k][1]) { roll -= ev[k][1]; k++; }
+    const out = ev[k][2]();
+    if (out) { news(out[0], out[1]); msg(out[0], out[1]); sfx('alert'); return; }
+    ev.splice(k, 1);
+  }
+}
+function drawNews() {
+  const n = S.news;
+  if (!n) return;
+  const tw0 = tw(n.text), speed = 55, x = W - (GT - n.t) * speed;
+  if (x + tw0 < 26) { nextNews(); return; }
+  const y = 331;
+  rect(0, y, W, 9, 'rgba(8,6,20,0.88)');
+  rect(0, y, W, 1, P.dgray);
+  ctx.save(); ctx.beginPath(); ctx.rect(26, y, W - 26, 9); ctx.clip();
+  txt(n.text, Math.round(x), y + 1, n.color);
+  ctx.restore();
+  rect(0, y, 24, 9, P.red); txt('VNN', 12, y + 1, P.white, 1, 'c');
+}
+
+// ---------------------------------------------------------------- the smuggler: a third buyer that pays big but risks fines
+const SMUG_W = 92;
+function spawnSmuggler() {
+  if (S.smug || daysLeft() < 10) return false;
+  S.smug = { kind: 'smug', name: 'SMUGGLER', x: 320, y: 46, days: 6 + Math.floor(Math.random() * 3), sat: 1, closed: 0, deliveries: 0, mul: 1.7 + Math.random() * 0.5 };
+  sfx('alert');
+  return true;
+}
+function smugPrice() { return (price(S.stations[0]) + price(S.stations[1])) / 2 * S.smug.mul * S.smug.sat; }
+function sellPrice(s) { return s.kind === 'smug' ? smugPrice() : price(s); }
+function smugRisk() { return Math.min(0.6, 0.15 + 0.06 * S.smug.deliveries); }
+function smugglers() { return S.haulers.filter(h => h.smug); }
+function smugAssign(h, on) {
+  h.smug = on;
+  if (h.state === 'toSell' || h.state === 'idle' || h.state === 'holding') { h.state = 'idle'; h.target = null; h.think = 0; }
+}
+function sendSmug() {
+  if (!S.smug) return;
+  const pool = S.haulers.filter(h => !h.smug).sort((a, b) => haulerCost(a) - haulerCost(b));
+  if (!pool.length) { msg(S.haulers.length ? 'ALL YOUR HAULERS ARE ALREADY SMUGGLING' : 'NO HAULERS YET - BUY ONE AT THE BOTTOM [3]', P.lgray); sfx('err'); return; }
+  smugAssign(pool[0], true);
+  msg('A HAULER NOW RUNS CRUDE TO THE SMUGGLER', P.orange); sfx('click');
+}
+function pullSmug() {
+  const pool = smugglers().sort((a, b) => haulerCost(a) - haulerCost(b));
+  if (!pool.length) { sfx('err'); return; }
+  smugAssign(pool[0], false);
+  msg('HAULER BACK ON LEGIT ROUTES', P.cyan); sfx('click');
+}
+function smugDelivered(h) {
+  const risk = smugRisk();
+  S.smug.deliveries++;
+  if (Math.random() >= risk) return;
+  const fine = Math.round((h.sale * 0.8 + 150 * S.belt) / 10) * 10;
+  G.credits -= fine; S.stats.spent += fine;
+  float(h.x, h.y - 18, '-$' + fmt(fine) + ' FINE', P.red);
+  msg('CONSORTIUM INSPECTORS! SMUGGLING FINE -$' + fmt(fine), P.red); sfx('err');
+}
+function smugDaily() {
+  if (!S.smug) {
+    if (G.sector >= 2 && S.lastDay >= S.nextSmug) { if (spawnSmuggler()) news('SMUGGLER SIGHTED OVER ' + S.name + ' - PAYS DOUBLE, NO QUESTIONS', P.orange); S.nextSmug = S.lastDay + 28 + Math.random() * 16; }
+    return;
+  }
+  S.smug.sat += (1 - S.smug.sat) * 0.1;
+  if (--S.smug.days > 0) return;
+  const old = S.smug;
+  S.smug = null;
+  for (const h of S.haulers) if (h.smug) { h.smug = false; if (h.target === old) { if (h.cargo > 0) goSell(h); else { h.state = 'idle'; h.target = null; } } }
+  msg('THE SMUGGLER SLIPPED AWAY INTO THE DARK', P.lgray);
+}
+function smugAt(x, y) { return S.smug && Math.abs(x - S.smug.x) <= 28 && Math.abs(y - S.smug.y) <= 10 ? S.smug : null; }
+function drawSmuggler() {
+  const s = S.smug;
+  if (!s) return;
+  const bob = Math.round(Math.sin(GT * 2) * 2), X = Math.round(s.x * R), Y = Math.round(s.y * R) + bob;
+  // tractor beam while unloading
+  if (S.haulers.some(h => h.target === s && h.state === 'selling')) { ctx.globalAlpha = 0.22; q(X - 10, Y + 10, 20, 12, '#ffcd75'); ctx.globalAlpha = 1; }
+  const fl = 4 + ((GT * 30) | 0) % 3 * 2;
+  q(X - 50 - fl * 3, Y - 3, fl * 3, 7, '#c46cff'); q(X - 50 - fl, Y - 1, fl, 3, '#f3c6ff');
+  glow((X - 54) / R, Y / R, 9, '#c46cff', 0.7);
+  q(X - 48, Y - 7, 104, 18, '#05060c');
+  q(X - 46, Y - 6, 92, 16, '#5a4a78'); q(X - 46, Y - 6, 92, 2, '#a892cc'); q(X - 46, Y + 8, 92, 2, '#2a2236');
+  q(X + 46, Y - 4, 8, 12, '#5a4a78'); q(X + 46, Y - 4, 8, 2, '#a892cc'); q(X + 54, Y - 1, 2, 6, '#5a4a78');
+  q(X - 46, Y + 2, 92, 2, '#ef7d57');
+  q(X - 28, Y - 15, 44, 10, '#05060c'); q(X - 26, Y - 14, 40, 9, '#6e5c92'); q(X - 26, Y - 14, 40, 1, '#c2b0e0');
+  q(X - 4, Y - 12, 16, 5, '#ffcd75'); q(X - 4, Y - 12, 16, 1, '#fff3c0'); glow((X + 4) / R, (Y - 10) / R, 6, '#ffcd75', 0.4);
+  q(X + 24, Y - 3, 6, 4, '#f4f4f4'); q(X + 25, Y - 2, 1, 1, '#05060c'); q(X + 28, Y - 2, 1, 1, '#05060c'); q(X + 25, Y + 1, 4, 1, '#f4f4f4');
+  for (let k = 0; k < 6; k++) { const on = ((GT * 4 + k) | 0) % 3 === 0; q(X - 40 + k * 16, Y + 10, 4, 2, on ? '#ff5a6a' : '#5a2a1e'); if (on) glow((X - 38 + k * 16) / R, (Y + 11) / R, 4, '#ff5a6a', 0.5); }
+}
+function drawSmugPanel() {
+  const s = S.smug;
+  if (!s) return;
+  const x0 = 320 - SMUG_W / 2, y0 = 14;
+  panel(x0, y0, SMUG_W, 22, '#2a1420', P.orange);
+  txt('SMUGGLER ' + s.days + 'D', x0 + 4, y0 + 4, P.orange);
+  txt('RISK ' + Math.round(smugRisk() * 100) + '%', x0 + SMUG_W - 4, y0 + 4, P.red, 1, 'r');
+  txt('$' + smugPrice().toFixed(1), x0 + 4, y0 + 13, P.yellow);
+  button(x0 + 56, y0 + 12, 8, 8, '<', pullSmug, { color: '#5a2a1e', hc: P.orange });
+  txt('' + smugglers().length, x0 + 75, y0 + 13, P.white, 1, 'r');
+  button(x0 + 80, y0 + 12, 8, 8, '>', sendSmug, { color: '#5a2a1e', hc: P.orange });
+}
+
+// ---------------------------------------------------------------- endless mode: past the Void Reach, quotas until you break
+const ENDLESS_NAMES = ['FAR SHORE', 'DEAD STAR', 'GLASS ABYSS', 'HOWLING DARK', 'NULL GARDEN', 'EVENT HORIZON', 'ASH NEBULA', 'COLD FURNACE', 'SILENT CHOIR', 'BONE ORCHARD'];
+function endlessQuota(tier) { return Math.round((350 + 110 * tier) * DF().crude / 10) * 10; }
+function endlessNode(s, k) {
+  const rng = mulberry32((G.seed * 7 + s * 101 + k * 13) >>> 0), tier = s - TOTAL_SECTORS;
+  const pool = [...RIVAL_IDS], rivals = [], nRiv = tier >= 6 && rng() < 0.4 ? 3 : 2;
+  while (rivals.length < nRiv) rivals.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  const mp = MODS.filter(m => m.id !== 'long'), mods = [];
+  while (mods.length < 2) {
+    const m = mp.splice(Math.floor(rng() * mp.length), 1)[0];
+    if ((m.id === 'boom' && mods.includes('slump')) || (m.id === 'slump' && mods.includes('boom'))) continue;
+    mods.push(m.id);
+  }
+  const payMul = Math.max(0.75, 1 + mods.reduce((a, id) => a + MODS.find(m => m.id === id).rd, 0) + 0.3 * (nRiv - 1));
+  return { k, name: ENDLESS_NAMES[Math.floor(rng() * ENDLESS_NAMES.length)] + ' ' + tier, rivals, mods, payMul: Math.round(payMul * 100) / 100 };
+}
+function ensureEndlessMap() { while (G.map.length < G.sector) { const s = G.map.length + 1; G.map.push([endlessNode(s, 0), endlessNode(s, 1)]); } }
+function startEndless() {
+  G.endless = { best: 0 };
+  G.sector = Math.max(G.sector, TOTAL_SECTORS + 1);
+  ensureEndlessMap();
+  save();
+  mapSel = null; shopTab = 'tech';
+  screen = 'shop'; sfx('fanfare');
+}
+function endEndless() {
+  const cleared = Math.max(0, G.report.tier - 1);
+  const pts = Math.round(4 * cleared * DF().legacy);
+  G.endlessPts = pts; G.endlessDepth = cleared;
+  META.legacy += pts; META.bestDepth = Math.max(META.bestDepth || 0, cleared);
+  saveMeta(); clearSave(); clearSectorSave();
+  screen = 'endlessover';
+  sfx('thud');
+}
+function renderEndlessOver() {
+  starfield(0.2);
+  bigTitle('RUN OVER', 90, 6);
+  txt('YOU MISSED THE QUOTA AT DEPTH ' + G.report.tier + ': SOLD ' + fmt(G.report.sold) + ' OF ' + fmt(G.report.quota) + ' UNITS.', 320, 150, P.orange, 1, 'c');
+  txt('DEPTHS CLEARED: ' + G.endlessDepth + '   BEST EVER: ' + (META.bestDepth || 0), 320, 164, P.cyan, 1, 'c');
+  txt('LIFETIME EARNINGS: $' + fmt(G.totalEarned), 320, 178, P.yellow, 1, 'c');
+  txtS('+' + (G.endlessPts || 0) + ' LEGACY POINTS', 320, 238, P.crudeL, 2, 'c');
+  button(250, 276, 140, 16, 'TITLE SCREEN', () => { screen = 'title'; sfx('click'); });
+}
+function renderEndlessMap() {
+  starfield(0.5);
+  ensureEndlessMap();
+  const tier = G.sector - TOTAL_SECTORS;
+  txtS('THE BEYOND', 320, 6, '#c46cff', 2, 'c');
+  txt('ENDLESS DEPTH ' + tier + '  -  BEST EVER ' + (META.bestDepth || 0) + '  -  SELL THE QUOTA OR THE RUN ENDS', 320, 24, P.lgray, 1, 'c');
+  G.map[G.sector - 1].forEach((n, k) => {
+    const x = 40 + k * 290, y = 44, w = 270, h = 240, sel = mapSel === k;
+    panel(x, y, w, h, sel ? '#232b5c' : P.navy, sel ? P.yellow : P.gray);
+    BTN.push({ x, y, w, h, fn: () => { mapSel = k; sfx('click'); } });
+    txtS(n.name, x + w / 2, y + 10, sel ? P.yellow : P.white, 2, 'c');
+    txt('QUOTA: SELL ' + fmt(endlessQuota(tier)) + ' UNITS', x + w / 2, y + 34, P.lime, 1, 'c');
+    txt('EVERY HAZARD.  RIVALS +' + Math.round(8 * tier) + '% PUMPING.  CRUDE -' + Math.round(Math.min(45, 4 * tier)) + '%', x + w / 2, y + 44, P.gray, 1, 'c');
+    if (G.sector % SECTORS_PER_BELT === 0) txtS('VOID WORM LAIR', x + w / 2, y + 56, P.red, 1, 'c');
+    txt('RIVALS', x + 12, y + 72, P.red);
+    n.rivals.forEach((id, j) => { drawPortrait(RIVALS[id].look, x + 12, y + 82 + j * 22, 1); txt(RIVALS[id].name, x + 32, y + 83 + j * 22, rcol(id)); txt(RIVALS[id].trait, x + 32, y + 91 + j * 22, P.gray); });
+    txt('CONDITIONS', x + 12, y + 156, P.yellow);
+    n.mods.forEach((id, j) => { const m = MODS.find(m => m.id === id); txt(m.name, x + 12, y + 166 + j * 18, P.white); txt(m.desc, x + 12, y + 174 + j * 18, P.gray); });
+    txt('SECTOR BONUSES X' + n.payMul.toFixed(2), x + 12, y + 222, n.payMul > 1 ? P.lime : P.white);
+  });
+  button(12, 338, 130, 16, '< WORKSHOP', () => { screen = 'shop'; sfx('click'); }, { color: P.dgray });
+  button(150, 338, 90, 16, 'STATS', () => { TS.statsBack = 'map'; screen = 'stats'; sfx('click'); }, { color: P.dblue });
+  const ok = mapSel != null;
+  button(430, 338, 200, 16, ok ? 'DESCEND TO DEPTH ' + tier + ' >>' : 'PICK A SECTOR FIRST', () => {
+    G.path[G.sector - 1] = mapSel;
+    const node = G.map[G.sector - 1][mapSel];
+    mapSel = null;
+    genSector(node); screen = 'play'; sfx('build');
+  }, { disabled: !ok, color: P.green, hc: P.lime, tc: P.navy });
+}
+
+// ---------------------------------------------------------------- guided tutorial (first sector): Old Zeke walks you through it
+const TUT = [
+  { text: "WELCOME, PROSPECTOR! I'M OLD ZEKE. I'LL SHOW YOU HOW TO GET RICH OFF VOIDCRUDE. TIME IS FROZEN FOR NOW.", ok: true },
+  { text: 'FIRST YOU NEED LAND. CLICK AN "AUCTION" SIGN ON THE SURFACE, THEN BID [B] UNTIL THE CLOCK RUNS OUT.',
+    done: () => S.plots.some(p => p.owner === 'you'), at: () => { const p = S.plots.find(p => !p.owner); return p && [p.x0 + PLOT_W / 2, SURF - 18]; } },
+  { text: 'NICE PLOT! NOW SCAN [4] AND CLICK OVER YOUR LAND. PURPLE BLOBS UNDERGROUND ARE VOIDCRUDE POCKETS.',
+    done: () => S.scans.length > 0 || myRigs().length > 0, at: () => [251, 342] },
+  { text: 'BUILD A RIG [1] ON YOUR PLOT, AS CLOSE TO ABOVE THE CRUDE AS YOU CAN.',
+    done: () => myRigs().length > 0, at: () => [51, 342] },
+  { text: 'CLICK YOUR RIG, THEN CLICK UNDERGROUND TO LAY PIPE. EACH CLICK ADDS A JOINT, SO YOU CAN BEND AROUND ROCK.',
+    done: () => S.segs.some(s => s.owner === 'you'), at: () => { const r = myRigs()[0]; return r && [r.x, SURF - 30]; } },
+  { text: 'PIPE COSTS CREDITS PER METER AS IT DRILLS. WAIT FOR IT TO HIT A POCKET. SOLID ROCK STOPS DRILLS - BLAST IT [5].',
+    done: () => myRigs().some(r => r.pockets.size), at: () => { const s = S.segs.find(s => s.owner === 'you' && s.status === 'drill'); return s && [s.x1 + s.ux * s.prog, s.y1 + s.uy * s.prog - 6]; } },
+  { text: 'STRUCK CRUDE! THE RIG PUMPS IT INTO ITS TANK. NOW BUY A HAULER [3] - IT FETCHES AND SELLS BY ITSELF.',
+    done: () => S.haulers.length > 0, at: () => [183, 342] },
+  { text: 'HELIX AND NOVA BUY CRUDE AT SWINGING PRICES. USE < > ON THESE PANELS TO MOVE HAULERS TO THE BETTER ONE.',
+    done: () => S.stats.sold > 0, ok: true, at: () => [37, 15] },
+  { text: 'EVERY SALE PAYS CREDITS AND XP. RANK UP AND YOU PICK A PERK CARD. SELLING DUMPS THE PRICE A LITTLE, SO SPREAD IT OUT.', ok: true },
+  { text: 'TOOLS: SILOS [2] STORE OVERFLOW. GLITCH [7] SNIFFS OUT GAS. [Q] IS YOUR TYCOON ABILITY. [6] IS THE BLACK MARKET.', ok: true, at: () => [378, 342] },
+  { text: 'WATCH OUT FOR RIVAL DIRTY TRICKS, BURIED RELICS AND THE VOID WORM. WHEN YOUR POCKETS RUN DRY, END EARLY FROM THE TOP BAR.', ok: true, last: true },
+];
+function tutFinish() {
+  S.tut = null; S.tutOff = true; G.tutorial = false;
+  META.tutDone = true; saveMeta();
+  msg('TUTORIAL DONE - GOOD LUCK, TYCOON!', P.lime); sfx('fanfare');
+}
+function tutNext() { if (!S.tut) return; if (TUT[S.tut.step].last) { tutFinish(); return; } S.tut.step++; sfx('click'); }
+function tutFrozen() { return !!(S && S.tut && S.tut.step === 0); }
+function drawTutorial() {
+  const T = S.tut;
+  while (T.step < TUT.length - 1 && TUT[T.step].done && TUT[T.step].done()) { T.step++; sfx('strike'); }
+  const st2 = TUT[T.step], x = 290, y = 262, w = 340, h = 46;
+  panel(x, y, w, h, '#1d1426', P.yellow);
+  drawPortrait(CANTINA_FOLK.zeke.look, x + 5, y + 7, 2);
+  txt('OLD ZEKE', x + 42, y + 4, P.yellow);
+  txt('TUTORIAL ' + (T.step + 1) + '/' + TUT.length, x + w - 50, y + 4, P.gray, 1, 'r');
+  wrap(st2.text, 72).forEach((l, i) => txt(l, x + 42, y + 14 + i * 8, P.white));
+  button(x + w - 46, y + 2, 42, 9, 'SKIP', tutFinish, { color: P.dgray });
+  if (st2.ok) button(x + w - 62, y + h - 13, 58, 10, st2.last ? 'FINISH' : 'GOT IT >', tutNext, { color: P.green, hc: P.lime, tc: P.navy });
+  const at = st2.at && st2.at();
+  if (at) {
+    const [ax, ay] = at, b = Math.round(Math.abs(Math.sin(GT * 5)) * 4);
+    for (let k = 0; k < 5; k++) rect(Math.round(ax - k), ay - 2 - b - k, k * 2 + 1, 1, P.yellow);
+    rect(Math.round(ax) - 1, ay - 11 - b, 3, 5, P.yellow);
+    glow(ax, ay - 8 - b, 8, '#ffcd75', 0.5);
+  }
+}
+
 // ---------------------------------------------------------------- update
 function update(dt) {
   S.t += dt;
@@ -2714,6 +3359,8 @@ function update(dt) {
   for (const h of S.haulers) updateHauler(h, dt);
   updateScans(dt);
   updateCritters(dt);
+  updateWorm(dt);
+  updateDrones(dt);
   for (const p of S.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.life -= dt; }
   S.parts = S.parts.filter(p => p.life > 0);
   for (const f of S.floats) { f.y -= 12 * dt; f.life -= dt; }
@@ -3149,8 +3796,8 @@ function drawTopBar() {
   [1, 2, 4].forEach((v, i) => button(362 + i * 17, 2, 16, 9, v + 'X', () => { S.speed = v; sfx('click'); }, { active: S.speed === v, color: P.dblue, hc: P.blue }));
   if (S.flare > 0) txt('FLARE', 415, 4, P.orange);
   if (stormActive()) txt('STORM', 415, 4, blink() ? P.crudeL : P.plum);
-  txt('BELT ' + S.belt + '/6', 470, 4, BELTS[S.belt - 1].col, 1, 'r');
-  txt('SHARES ' + G.shares + ':' + rivalTotal(), 548, 4, P.lgray, 1, 'r');
+  if (S.tier) { txt('DEPTH ' + S.tier, 470, 4, '#c46cff', 1, 'r'); txt('QUOTA ' + fmt(S.stats.sold) + '/' + fmt(S.quota), 548, 4, S.stats.sold >= S.quota ? P.lime : P.orange, 1, 'r'); }
+  else { txt('BELT ' + S.belt + '/6', 470, 4, BELTS[S.belt - 1].col, 1, 'r'); txt('SHARES ' + G.shares + ':' + rivalTotal(), 548, 4, P.lgray, 1, 'r'); }
   txt('$' + fmt(G.credits), W - 4, 4, P.yellow, 1, 'r');
 }
 const SP_W = 70;
@@ -3174,7 +3821,8 @@ function drawStationPanels() {
     else txt('$' + pr.toFixed(1), x0 + 4, y0 + 13, P.yellow, 2);
     const prev = s.hist[s.hist.length - 3] || pr, up = pr >= prev, ax = x0 + w - 7, ay = y0 + 14;
     if (!shut) for (let k = 0; k < 3; k++) rect(ax - k, up ? ay + k : ay + 4 - k, k * 2 + 1, 1, up ? P.lime : P.red);
-    if (!shut && (hot || low)) txt(hot ? 'HOT' : 'LOW', ax - 5, ay + 1, hot ? P.lime : P.orange, 1, 'r');
+    if (!shut && s.bribed > 0) txt('-25', ax - 5, ay + 1, P.red, 1, 'r');
+    else if (!shut && (hot || low)) txt(hot ? 'HOT' : 'LOW', ax - 5, ay + 1, hot ? P.lime : P.orange, 1, 'r');
     // price history (+ forecast with Market Intel)
     const vals = s.hist.slice(-24), fc = [];
     if (has('intel')) for (let k = 1; k <= 10; k++) fc.push(rawPrice(s, S.day + k) * (s.multT >= k ? s.mult : 1) * (s.sat + (1 - s.sat) * Math.min(1, k * 0.1)));
@@ -3202,7 +3850,7 @@ function drawStationPanels() {
   });
 }
 function drawMessages() {
-  let y = 16;
+  let y = S.smug ? 38 : 16;
   for (const m of S.msgs) {
     const age = GT - m.t;
     if (age > 6) continue;
@@ -3213,7 +3861,7 @@ function drawMessages() {
   ctx.globalAlpha = 1;
 }
 function tutorialHint() {
-  if (G.sector > 1) return null;
+  if (G.sector > 1 || S.tutOff) return null;
   const mine = myRigs();
   if (!S.plots.some(p => p.owner === 'you')) return 'WIN A PLOT AT AUCTION - CLICK AN "AUCTION" SIGN';
   if (!S.scans.length && !S.segs.some(s => s.owner === 'you')) return 'SCAN FOR VOIDCRUDE [4], THEN CLICK ON YOUR PLOT';
@@ -3225,6 +3873,7 @@ function tutorialHint() {
   return null;
 }
 function drawHint() {
+  if (S.tut) { drawTutorial(); return; }
   const h = tutorialHint();
   if (!h) return;
   const w = tw(h) + 10;
@@ -3298,7 +3947,7 @@ function drawSelPanel() {
       lines = ['RIG #' + o.id + ' - ' + state + (nl ? '   COUPLED TO ' + nl + ' RIG' + (nl > 1 ? 'S' : '') : ''), 'TANK ' + fmt(o.tank) + '/' + st.rigCap() + '   CRUDE LEFT IN POCKETS ' + fmt(live) + 'U', has('coupler') ? 'DRILL INTO ANOTHER RIG\'S PIPE TO COUPLE THEM' : 'CLICK TO ADD PIPE JOINTS. DRAG FROM A JOINT TO BRANCH. RIGHT-CLICK ENDS'];
       btns = [['STOP DRILL', () => stopDrill(o), { disabled: !activeSeg(o) }], ['SCRAP +$' + Math.round(COST.rig * 0.4), () => scrapRig(o), { color: P.red }]];
     } else if (S.sel.kind === 'hauler') {
-      lines = ['HAULER - ' + haulerLabel(o), 'CARGO ' + fmt(o.cargo) + '/' + st.hCap() + '   SELLS AT ' + S.stations[o.side].name + (has('auto') ? ' (SMART)' : ''), 'FULLY AUTOMATIC. PICK ITS SIDE ON THE RIGHT'];
+      lines = ['HAULER - ' + haulerLabel(o), 'CARGO ' + fmt(o.cargo) + '/' + st.hCap() + '   SELLS AT ' + (o.smug && S.smug ? 'THE SMUGGLER' : S.stations[o.side].name) + (has('auto') ? ' (SMART)' : ''), 'FULLY AUTOMATIC. PICK ITS SIDE ON THE RIGHT'];
       btns = [['< HELIX', () => setSide(o, 0), { active: o.side === 0 }], ['NOVA >', () => setSide(o, 1), { active: o.side === 1 }]];
     } else if (S.sel.kind === 'silo') {
       lines = ['SILO - ' + fmt(o.tank) + '/' + st.siloCap(), 'RIGS WITHIN 16M PIPE THEIR CRUDE IN HERE', 'SEND HAULERS HERE TO LOAD'];
@@ -3317,7 +3966,10 @@ function drawTooltip() {
   const m = mouse;
   if (m.y > UG_TOP && m.y < UG_BOT) {
     const ci = cellIndexAt(m.x, m.y);
-    if (ci >= 0 && S.rev[ci]) {
+    const wm = S.worm;
+    if (wormActive() && Math.hypot(wm.x - m.x, wm.y - m.y) < 10) lines.push('THE VOID WORM - ' + wm.hp + '/' + wm.max + ' HP', 'IT EATS PIPES. BLAST ITS HEAD [5] OR DROP GLITCH [7]');
+    else if ((S.relics || []).some(o => !o.found && S.rev[o.r * COLS + o.c] && Math.hypot(o.x - m.x, o.y - m.y) < 6)) lines.push('BURIED RELIC', 'RUN A PIPE THROUGH IT OR BLAST IT');
+    else if (ci >= 0 && S.rev[ci]) {
       const t = S.grid[ci];
       if (t === T_OIL) {
         const p = S.pockets[S.pid[ci]];
@@ -3328,10 +3980,15 @@ function drawTooltip() {
       else if (t === T_ROCK) lines.push('SOLID ROCK', st.rock() ? 'LASER BORE CAN CUT IT' : 'BLOCKS DRILLS - BLAST IT [5]');
       else if (t === T_GAS) lines.push('GAS POCKET', has('gas') ? 'SIPHON READY - WORTH $$$' : 'DANGER: BLOWOUT!');
     }
+  } else if (S.smug && m.y > 13 && m.y < SURF + 4 && (smugAt(m.x, m.y) || inRect(m, 320 - SMUG_W / 2, 14, SMUG_W, 22))) {
+    lines.push('SMUGGLER - PAYS $' + smugPrice().toFixed(2) + ' / UNIT (' + S.smug.mul.toFixed(1) + 'X MARKET)', 'EVERY DELIVERY RISKS A FINE: ' + Math.round(smugRisk() * 100) + '% AND RISING', 'LEAVES IN ' + S.smug.days + ' DAYS. > OR CLICK: SEND A HAULER');
+  } else if (m.y > 13 && m.y < SURF + 4 && droneAt(m.x, m.y)) {
+    lines.push('RAIDER DRONE', 'STEALS HALF A HAULER LOAD. CLICK TO SHOOT IT DOWN');
   } else if (m.y > 13 && m.y < SURF + 4) {
     const s = S.stations.find(s => (Math.abs(m.x - s.x) <= 26 && m.y > SURF - 44) || (m.y < 71 && m.x >= stationPanelX(s) && m.x <= stationPanelX(s) + SP_W));
     if (s) {
       lines.push(s.name + ' REFINERY', s.closed > 0 ? 'CLOSED ' + s.closed + ' DAYS' : 'PAYS $' + price(s).toFixed(2) + ' / UNIT');
+      if (s.bribed > 0) lines.push('BRIBED BY A RIVAL: PAYS YOU 25% LESS FOR ' + s.bribed + ' DAYS');
       lines.push('HAULERS SELLING HERE: ' + S.haulers.filter(h => h.side === S.stations.indexOf(s)).length, '> OR CLICK: MOVE ONE HERE.  <: MOVE ONE AWAY');
       if (s.job) lines.push('CONTRACT: ' + Math.floor(s.job.done) + '/' + s.job.units + 'U BY DAY ' + s.job.deadline, 'REWARD $' + fmt(s.job.cred));
     }
@@ -3404,7 +4061,7 @@ function drawPauseMenu() {
 }
 function drawHelpPanel(onClose) {
   rect(0, 0, W, H, 'rgba(5,5,15,0.82)');
-  const w = 400, h = 210, x = (W - w) / 2, y = 60;
+  const w = 400, h = 226, x = (W - w) / 2, y = 60;
   panel(x, y, w, h, P.navy, P.crude);
   txtS('HOW TO PLAY', W / 2, y + 7, P.crudeL, 2, 'c');
   HELP.forEach((l, i) => txt(l, x + 12, y + 24 + i * 8, l.startsWith('KEYS') ? P.cyan : P.white));
@@ -3432,24 +4089,31 @@ function renderPlay() {
   drawPlotLines();
   drawScanWaves();
   drawPipes();
+  drawRelics();
+  drawWorm();
   drawCritters();
   drawPreview();
   for (const s of S.stations) drawStation(s);
+  drawSmuggler();
   drawPlotFlags();
   drawLinks();
   for (const s of S.silos) drawSilo(s);
   for (const sc of S.scans) drawScanner(sc);
   for (const r of S.rigs) drawRig(r);
+  drawSiphons();
   drawSelection();
   for (const h of S.haulers) drawHauler(h);
+  drawDrones();
   drawGhost();
   drawParticles();
   for (const f of S.floats) { ctx.globalAlpha = Math.min(1, f.life); txtS(f.text, f.x, f.y | 0, f.color, 1, 'c'); }
   ctx.globalAlpha = 1;
   ctx.restore();
   drawStationPanels();
+  drawSmugPanel();
   drawTopBar();
   drawMessages();
+  drawNews();
   drawHint();
   drawPlotButtons();
   drawBottomBar();
@@ -3461,6 +4125,7 @@ function renderPlay() {
   if (S.bm) drawBlackMarket();
   if (S.auction) drawAuction();
   if (S.choice) drawCards();
+  else if (S.relicQ && S.relicQ.length) drawRelicPick();
   if (S.confirmEnd) drawEndConfirm();
   if (S.paused) drawPauseMenu();
   if (S.help) drawHelpPanel(() => { S.help = false; });
@@ -3542,7 +4207,7 @@ function renderTitle() {
   button(322, y, 68, 13, 'MUSIC ' + (Sound.music ? 'ON' : 'OFF'), toggleMusic);
   y += 17;
   button(250, y, 140, 13, 'CRT ' + (crt.classList.contains('off') ? 'OFF' : 'ON'), toggleCrt);
-  txt('PROGRESS SAVES IN THIS BROWSER BETWEEN SECTORS   RUNS ' + META.runs + '   WINS ' + META.wins, 320, 344, P.gray, 1, 'c');
+  txt('PROGRESS SAVES IN THIS BROWSER BETWEEN SECTORS   RUNS ' + META.runs + '   WINS ' + META.wins + (META.bestDepth ? '   BEST DEPTH ' + META.bestDepth : ''), 320, 344, P.gray, 1, 'c');
   if (TS.help) drawHelpPanel(() => { TS.help = false; });
 }
 function row(label, value, y, col = P.white) {
@@ -3559,7 +4224,7 @@ function renderSummary() {
   let y = 66;
   const profit = r.revenue + r.gas + r.fire + (r.bonusTotal || 0) - r.spent;
   row('CRUDE SOLD', fmt(r.sold) + ' U', y); y += 11;
-  row('SALES + CONTRACTS', '$' + fmt(r.revenue), y, P.yellow); y += 11;
+  row('SALES, CONTRACTS, RELICS', '$' + fmt(r.revenue), y, P.yellow); y += 11;
   row('GAS SIPHONED', '$' + fmt(r.gas), y, P.cyan); y += 11;
   row('LEFTOVER FIRE SALE (' + fmt(r.crude) + 'U AT 40%)', '$' + fmt(r.fire), y, P.yellow); y += 11;
   row('EXPENSES', '-$' + fmt(r.spent), y, P.red); y += 11;
@@ -3568,6 +4233,7 @@ function renderSummary() {
   for (const [label, v] of (r.bonuses || [])) { row('BONUS: ' + label, '+$' + fmt(v), y, P.lime); y += 11; }
   if (!(r.bonuses || []).length) { row('NO SECTOR BONUSES (DRAIN, SELL OUT, CLEAR GAS, END EARLY)', '$0', y, P.gray); y += 11; }
   row('PEAK RANK / CONTRACTS', (r.rank || 0) + ' / ' + (r.jobs || 0), y, P.yellow); y += 13;
+  if (r.quota) { row('QUOTA (DEPTH ' + r.tier + ')', fmt(r.sold) + ' / ' + fmt(r.quota), y, r.sold >= r.quota ? P.lime : P.red); y += 11; }
   for (const rr of (r.rivals || [])) {
     row(RIVALS[rr.id].short + (rr.active ? ' PUMPED ' + fmt(rr.pumped) + 'U' : ' (ELSEWHERE)'), 'CASH $' + fmt(G.rcash[rr.id]), y, rcol(rr.id)); y += 11;
   }
@@ -3575,8 +4241,8 @@ function renderSummary() {
   y += 3;
   if (r.stipend) { txt('THE CONSORTIUM TOPPED YOU UP TO $' + fmt(START_FLOOR) + ' (+$' + fmt(r.stipend) + ')', 320, y, P.orange, 1, 'c'); y += 10; }
   txt('$' + fmt(G.credits), 320, y + 2, P.yellow, 2, 'c');
-  const auction = r.sector % SECTORS_PER_BELT === 0 && beltOf(r.sector) >= 2;
-  button(230, 300, 180, 16, auction ? 'TO THE STOCK AUCTION >>' : 'CONTINUE', () => { afterSummary(); sfx('click'); }, { color: auction ? P.green : P.dblue, tc: auction ? P.navy : P.white });
+  const auction = !G.endless && r.sector % SECTORS_PER_BELT === 0 && beltOf(r.sector) >= 2;
+  button(230, 300, 180, 16, auction ? 'TO THE STOCK AUCTION >>' : G.endless && r.sold < r.quota ? 'QUOTA MISSED >>' : 'CONTINUE', () => { afterSummary(); sfx('click'); }, { color: auction ? P.green : P.dblue, tc: auction ? P.navy : P.white });
 }
 // tech tree layout: 4 branch columns, prerequisite lines routed in "lanes" left of each column
 const TREE = { colX: b => 12 + b * 78, nodeX: b => 22 + b * 78, nodeY: r => 50 + r * 29, nw: 68, nh: 24, lanes: [] };
@@ -3673,7 +4339,7 @@ function renderShop() {
   starfield(0.2);
   rect(0, 0, W, 14, P.navy);
   const bnow = beltOf(G.sector);
-  txt('WORKSHOP - NEXT: SECTOR ' + G.sector + '/' + TOTAL_SECTORS + ', BELT ' + bnow + ' ' + BELTS[bnow - 1].name, 6, 5, P.cyan);
+  txt(G.endless ? 'WORKSHOP - NEXT: ENDLESS DEPTH ' + (G.sector - TOTAL_SECTORS) + ' (QUOTA ' + fmt(endlessQuota(G.sector - TOTAL_SECTORS)) + 'U)' : 'WORKSHOP - NEXT: SECTOR ' + G.sector + '/' + TOTAL_SECTORS + ', BELT ' + bnow + ' ' + BELTS[bnow - 1].name, 6, 5, P.cyan);
   txt('$' + fmt(G.credits), W - 6, 5, P.yellow, 1, 'r');
   panel(6, 20, 400, 312, P.navy, P.gray);
   const got = ACH.filter(a => G.ach[a.id]).length;
@@ -3691,8 +4357,8 @@ function renderShop() {
   for (const id of RIVAL_IDS) { txt(RIVALS[id].short, 430, y, rcol(id)); txt('$' + fmt(G.rcash[id]), 545, y, P.gray, 1, 'r'); txt(G.rshares[id] + ' SH', 620, y, rcol(id), 1, 'r'); y += 10; }
   y += 3;
   const nextA = Math.ceil(G.sector / SECTORS_PER_BELT) * SECTORS_PER_BELT, nb = beltOf(nextA);
-  txt(nb >= 2 ? 'NEXT STOCK AUCTION: AFTER SECTOR ' + nextA : 'STOCK AUCTIONS START AFTER BELT 2', 430, y, P.yellow); y += 9;
-  if (nb >= 2) { txt((SHARE_LOTS[nb] + (G.unsold || 0)) + ' SHARES, ~$' + fmt(shareBase(nb)) + ' EACH', 430, y, P.gray); y += 9; }
+  txt(G.endless ? 'ENDLESS: NO AUCTIONS. HIT EVERY QUOTA' : nb >= 2 ? 'NEXT STOCK AUCTION: AFTER SECTOR ' + nextA : 'STOCK AUCTIONS START AFTER BELT 2', 430, y, P.yellow); y += 9;
+  if (nb >= 2 && !G.endless) { txt((SHARE_LOTS[nb] + (G.unsold || 0)) + ' SHARES, ~$' + fmt(shareBase(nb)) + ' EACH', 430, y, P.gray); y += 9; }
   txt('RIVALS HOARD CASH TO OUTBID YOU THERE', 430, y, P.gray); y += 14;
   if (G.report) {
     const r = G.report, profit = r.revenue + r.gas + r.fire + (r.bonusTotal || 0) - r.spent;
@@ -3731,6 +4397,7 @@ function renderEnd(win) {
   txtS('+' + (G.legacyEarned || 0) + ' LEGACY POINTS', 320, 238, P.crudeL, 2, 'c');
   txt('SPEND THEM ON THE TITLE SCREEN TO START YOUR NEXT RUN STRONGER', 320, 258, P.lgray, 1, 'c');
   button(250, 276, 140, 16, 'TITLE SCREEN', () => { screen = 'title'; TS.fw = null; sfx('click'); });
+  if (win && !G.endless) { button(210, 298, 220, 16, 'KEEP DRILLING: ENDLESS MODE >>', () => { TS.fw = null; startEndless(); }, { color: P.plum, hc: P.crude }); txt('YOUR UPGRADES VS EVER-RISING QUOTAS', 320, 318, P.gray, 1, 'c'); }
 }
 
 // ---------------------------------------------------------------- tycoon HUD, taunts, black market
@@ -3796,6 +4463,8 @@ function renderCharSelect() {
   starfield(0.4);
   txtS('CHOOSE YOUR TYCOON', 320, 8, P.crudeL, 2, 'c');
   txt('LEGACY POINTS: ' + META.legacy, W - 8, 10, P.yellow, 1, 'r');
+  if (TS.tutorial == null) TS.tutorial = !META.tutDone && !META.runs;
+  button(8, 6, 96, 13, 'TUTORIAL: ' + (TS.tutorial ? 'ON' : 'OFF'), () => { TS.tutorial = !TS.tutorial; sfx('click'); }, { active: TS.tutorial, color: P.dblue });
   CHARACTERS.forEach((c, i) => {
     const x = 10 + (i % 3) * 210, y = 28 + ((i / 3) | 0) * 148, w = 200, h = 142;
     const owned = !!META.chars[c.id], sel = TS.pickChar === c.id, hov = inRect(mouse, x, y, w, h);
@@ -3876,6 +4545,7 @@ function pipeGrab(x, y) {
   return best;
 }
 function playDown(p) {
+  if (S.relicQ && S.relicQ.length) return;
   if (S.paused || S.help || S.choice || S.bm || S.auction || S.confirmEnd || S.tool) return;
   S.drag = null;
   const r = rigAt(p.x, p.y);
@@ -3883,6 +4553,7 @@ function playDown(p) {
   if (p.y > UG_TOP) { const g = pipeGrab(p.x, p.y); if (g) S.drag = { kind: 'pipe', rig: g.rig, start: g.start }; }
 }
 function playUp(p) {
+  if (S.relicQ && S.relicQ.length) return;
   if (S.paused || S.help || S.choice || S.bm || S.auction || S.confirmEnd) return;
   if (S.tool === 'glitch') { releaseGlitch(p.x, p.y); return; }
   if (S.tool === 'blast') { if (p.y < 341) blast(p.x, p.y); return; }
@@ -3894,6 +4565,12 @@ function playUp(p) {
   clickWorld(p);
 }
 function clickWorld(p) {
+  const dr = droneAt(p.x, p.y);
+  if (dr) { shootDrone(dr); return; }
+  if (smugAt(p.x, p.y) || (S.smug && inRect(p, 320 - SMUG_W / 2, 14, SMUG_W, 22))) {
+    if (S.sel && S.sel.kind === 'hauler') { smugAssign(S.sel.ref, true); msg('HAULER NOW RUNS CRUDE TO THE SMUGGLER', P.orange); sfx('click'); } else sendSmug();
+    return;
+  }
   const stn = stationAt(p.x, p.y);
   if (stn) {
     if (S.sel && S.sel.kind === 'hauler') setSide(S.sel.ref, S.stations.indexOf(stn));
@@ -3903,7 +4580,7 @@ function clickWorld(p) {
   const h = haulerAt(p.x, p.y);
   if (h) { S.sel = { kind: 'hauler', ref: h }; sfx('click'); return; }
   const r = rigAt(p.x, p.y);
-  if (r) { if (r.owner === 'you') { S.sel = { kind: 'rig', ref: r }; S.pen = null; sfx('click'); } return; }
+  if (r) { if (r.owner === 'you') { if (r.siphon) ripSiphon(r); S.sel = { kind: 'rig', ref: r }; S.pen = null; sfx('click'); } return; }
   const si = siloAt(p.x, p.y);
   if (si) { S.sel = { kind: 'silo', ref: si }; sfx('click'); return; }
   if (S.sel && S.sel.kind === 'rig' && p.y > UG_TOP) {
@@ -3946,6 +4623,7 @@ addEventListener('keydown', e => {
   if (screen !== 'play' || !S) return;
   const k = e.key.toLowerCase();
   if (S.choice) { const i = '123'.indexOf(k); if (i >= 0 && S.choice[i]) pickPerk(i); return; }
+  if (S.relicQ && S.relicQ.length) { if (k === '1') resolveRelic(false); else if (k === '2') resolveRelic(true); return; }
   if (S.confirmEnd) { if (k === 'enter') finishEarly(); else if (k === 'escape') S.confirmEnd = false; return; }
   if (S.auction && !S.paused) { if (k === 'b') auctionBid('you'); else if (k === 'escape') auctionPass(); return; }
   if (S.bm && k !== 'escape' && k !== '6') return;
@@ -3980,9 +4658,9 @@ const STEP = 1 / 60;
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now; GT += dt;
-  if (screen === 'play' && S && S.auction && !S.paused && !S.help) updateAuction(dt);
+  if (screen === 'play' && S && S.auction && !S.paused && !S.help && !tutFrozen()) updateAuction(dt);
   if (screen === 'stock') updateStock(dt);
-  if (screen === 'play' && S && !S.paused && !S.help && !S.choice && !S.bm && !S.auction && !S.confirmEnd) {
+  if (screen === 'play' && S && !S.paused && !S.help && !S.choice && !S.bm && !S.auction && !S.confirmEnd && !(S.relicQ && S.relicQ.length) && !tutFrozen()) {
     acc += dt * S.speed;
     let n = 0;
     while (acc >= STEP && n < 24) { update(STEP); acc -= STEP; n++; if (screen !== 'play') break; }
@@ -4005,6 +4683,7 @@ function frame(now) {
   else if (screen === 'cantina') renderCantina();
   else if (screen === 'stats') renderStats();
   else if (screen === 'stock') renderStock();
+  else if (screen === 'endlessover') renderEndlessOver();
   requestAnimationFrame(frame);
 }
 Sound.loadPrefs();
