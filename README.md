@@ -80,9 +80,11 @@ docker run -d --name voidcrude -p 8088:80 voidcrude:latest
 | `Q` | Your tycoon's ability |
 | `1`-`3` on a rank-up | Pick a perk card |
 | Click rig, then underground | Drill a pipe (drag from any pipe to branch) |
-| Click a hauler, then a station | Switch which side it sells at |
+| Click a refinery, or ► on its price panel | Send one more hauler to that side (buys one if needed) |
+| ◄ on a refinery's price panel | Move one of its haulers to the other side |
+| Click a hauler, then a refinery | Switch that hauler's side |
 | `Space` | Pause menu |
-| `F` | Game speed x1 / x2 / x4 |
+| `1X` `2X` `4X` (top bar) or `F` | Game speed |
 | `Tab` | Cycle haulers |
 | `Esc` / right-click | Cancel |
 | `M` | Music toggle |

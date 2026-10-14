@@ -198,7 +198,7 @@ const HELP = [
   '   DRAG FROM ANY PIPE TO BRANCH IT. PIPE COSTS CREDITS PER METER.',
   '5. HIT A PURPLE POCKET AND THE RIG PUMPS IT INTO ITS TANK.',
   '6. BUY HAULERS [3] AND PICK A SIDE: HELIX (LEFT) OR NOVA (RIGHT).',
-  '   THEY FETCH CRUDE AND SELL IT BY THEMSELVES. CLICK ONE TO SWITCH.',
+  '   THEY RUN THEMSELVES. CLICK A REFINERY OR USE < > ON ITS PANEL.',
   '7. SILOS [2] NEXT TO RIGS STORE THE OVERFLOW.',
   '8. ROCK IN THE WAY? ROCK BLASTER [5] CLEARS IT. LIMITED CHARGES.',
   '',
@@ -791,7 +791,7 @@ function blast(x, y) {
   if (S.blasts <= 0) S.tool = null;
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } }
-function sharePrice() { return Math.round(400 * Math.pow(1.05, G.shares + rivalTotal()) / 10) * 10; }
+function sharePrice() { return Math.round(650 * Math.pow(1.05, G.shares + rivalTotal()) / 10) * 10; }
 
 // ---------------------------------------------------------------- sector generation
 function blob(cx, cy, rx, ry, rng) {
@@ -864,7 +864,7 @@ function genSector(opt) {
   const mods = opt.mods;
   const N = COLS * ROWS;
   S = {
-    d, rng, t: 0, day: 0, lastDay: 0, dayLen: 1.5, days: 120, speed: 1, paused: false, help: false, shake: 0,
+    d, rng, t: 0, day: 0, lastDay: 0, dayLen: 3, days: 120, speed: 1, paused: false, help: false, shake: 0,
     grid: new Uint8Array(N), pid: new Int16Array(N).fill(-1), rev: new Uint8Array(N),
     pockets: [], gases: [], plots: [], rigs: [], silos: [], haulers: [], scans: [], segs: [],
     parts: [], floats: [], msgs: [], sel: null, tool: null, drag: null, nid: 1,
@@ -1515,13 +1515,26 @@ function pickSource(h) {
 }
 function park(h) {
   const s = S.stations[h.side];
-  h.idleX = s.x + (h.side ? -1 : 1) * (36 + (h.id % 4) * 7);
+  h.idleX = s.x + (h.side ? -1 : 1) * (50 + (h.id % 4) * 7);
   h.idleY = CRUISE - 8 + (h.id % 3) * 5;
 }
 function goSell(h) {
   const s = sellTarget(h);
   if (!s) { h.state = 'idle'; h.target = null; park(h); return; }
   h.target = s; h.state = 'toSell';
+}
+// cheapest hauler to reassign: idle and empty first, mid-delivery last
+function haulerCost(h) { return ({ idle: 0, toLoad: 1, loading: 2 }[h.state] ?? 3) * 100 + h.cargo; }
+function sendHaulerTo(side) {
+  const pool = S.haulers.filter(h => h.side !== side).sort((a, b) => haulerCost(a) - haulerCost(b));
+  if (pool.length) { setSide(pool[0], side); return; }
+  if (!afford(COST.hauler)) return;
+  buyHaulerSide(side);
+}
+function pullHaulerFrom(side) {
+  const pool = S.haulers.filter(h => h.side === side).sort((a, b) => haulerCost(a) - haulerCost(b));
+  if (!pool.length) { msg('NO HAULERS ARE SELLING AT ' + S.stations[side].name, P.lgray); sfx('err'); return; }
+  setSide(pool[0], 1 - side);
 }
 function setSide(h, side) {
   if (h.side === side) return;
@@ -2171,25 +2184,40 @@ function drawTopBar() {
   const day = Math.min(S.days, Math.floor(S.day) + 1);
   txt('DAY ' + day + '/' + S.days, 254, 4, P.white, 1, 'r');
   meter(258, 3.5, 100, 6, S.day / S.days, S.days - S.day < 10 ? P.orange : P.green);
-  if (S.flare > 0) txt('FLARE', 364, 4, P.orange);
+  [1, 2, 4].forEach((v, i) => button(362 + i * 17, 2, 16, 9, v + 'X', () => { S.speed = v; sfx('click'); }, { active: S.speed === v, color: P.dblue, hc: P.blue }));
+  if (S.flare > 0) txt('FLARE', 415, 4, P.orange);
   txt(G.rd + ' RD', 470, 4, P.cyan, 1, 'r');
   txt('SHARES ' + G.shares + ':' + rivalTotal(), 548, 4, P.lgray, 1, 'r');
   txt('$' + fmt(G.credits), W - 4, 4, P.yellow, 1, 'r');
 }
+const SP_W = 70;
+function stationPanelX(s) { return s.x < 320 ? 2 : W - SP_W - 2; }
 function drawStationPanels() {
-  for (const s of S.stations) {
-    const x0 = s.x < 320 ? 2 : W - 60, y0 = 14, w = 58, h = s.job ? 43 : 35;
-    panel(x0, y0, w, h, P.navy, s.closed > 0 ? P.red : (S.sel && S.sel.kind === 'hauler' && inRect(mouse, x0, y0, w, h) ? P.yellow : P.gray));
-    txt(s.name + (s.closed > 0 ? ' CLOSED' : s.mult > 1 ? ' HOT!' : s.mult < 1 ? ' CRASH' : ''), x0 + 3, y0 + 3, s.closed > 0 ? P.red : s.mult > 1 ? P.lime : P.cyan);
+  S.stations.forEach((s, side) => {
+    const x0 = stationPanelX(s), y0 = 14, w = SP_W, h = s.job ? 46 : 37;
+    const hot = s.mult > 1, low = s.mult < 1, shut = s.closed > 0;
+    panel(x0, y0, w, h, P.navy, shut ? P.red : (S.sel && S.sel.kind === 'hauler' && inRect(mouse, x0, y0, w, h) ? P.yellow : P.gray));
+    txt(s.name, x0 + 4, y0 + 4, shut ? P.red : hot ? P.lime : low ? P.orange : P.cyan);
+    // hauler count spinner
+    const n = S.haulers.filter(hh => hh.side === side).length;
+    button(x0 + 37, y0 + 3, 8, 8, '<', () => pullHaulerFrom(side), { color: P.dblue, hc: P.blue });
+    const IX = (x0 + 47) * R, IY = (y0 + 5) * R;
+    q(IX, IY, 7, 3, '#8b9bc0'); q(IX, IY, 6, 1, '#d6e0f0'); q(IX + 4, IY, 2, 1, '#41a6f6'); q(IX + 1, IY + 3, 4, 1, '#9b30d9');
+    txt('' + n, x0 + 59, y0 + 4, n ? P.white : P.gray, 1, 'r');
+    button(x0 + 61, y0 + 3, 8, 8, '>', () => sendHaulerTo(side), { color: P.dblue, hc: P.blue });
+    // price, trend and status
     const pr = price(s);
-    txt('$' + pr.toFixed(1), x0 + 3, y0 + 11, P.yellow, 2);
-    const prev = s.hist[s.hist.length - 3] || pr, up = pr >= prev, ax = x0 + w - 7, ay = y0 + 12;
-    for (let k = 0; k < 3; k++) rect(ax - k, up ? ay + k : ay + 4 - k, k * 2 + 1, 1, up ? P.lime : P.red);
+    if (shut) txt('SHUT ' + s.closed + 'D', x0 + 4, y0 + 13, P.red, 2);
+    else txt('$' + pr.toFixed(1), x0 + 4, y0 + 13, P.yellow, 2);
+    const prev = s.hist[s.hist.length - 3] || pr, up = pr >= prev, ax = x0 + w - 7, ay = y0 + 14;
+    if (!shut) for (let k = 0; k < 3; k++) rect(ax - k, up ? ay + k : ay + 4 - k, k * 2 + 1, 1, up ? P.lime : P.red);
+    if (!shut && (hot || low)) txt(hot ? 'HOT' : 'LOW', ax - 5, ay + 1, hot ? P.lime : P.orange, 1, 'r');
+    // price history (+ forecast with Market Intel)
     const vals = s.hist.slice(-24), fc = [];
     if (has('intel')) for (let k = 1; k <= 10; k++) fc.push(rawPrice(s, S.day + k) * (s.multT >= k ? s.mult : 1) * (s.sat + (1 - s.sat) * Math.min(1, k * 0.1)));
     vals.push(pr);
     const all = vals.concat(fc), mn = Math.min(...all), mx = Math.max(...all);
-    const sx = x0 + 3, sy = y0 + 23, sw = w - 6, sh = 9;
+    const sx = x0 + 4, sy = y0 + 25, sw = w - 8, sh = 9;
     rect(sx, sy, sw, sh, '#0f1020');
     for (let i = 0; i < all.length; i++) {
       const px = sx + Math.round(i * (sw - 1) / (all.length - 1));
@@ -2198,11 +2226,10 @@ function drawStationPanels() {
     }
     if (s.job) {
       const j = s.job, left = j.deadline - Math.floor(S.day);
-      rect(sx, sy + 11, sw, 7, P.black);
-      rect(sx, sy + 11, Math.round(sw * Math.min(1, j.done / j.units)), 7, P.teal);
-      txt('JOB ' + Math.floor(j.done) + '/' + j.units + ' ' + left + 'D', x0 + w / 2, sy + 12, left <= 5 && blink() ? P.orange : P.white, 1, 'c');
+      meter(sx, sy + 11, sw, 8, j.done / j.units, P.teal);
+      txt('JOB ' + Math.floor(j.done) + '/' + j.units + ' ' + left + 'D', x0 + w / 2, sy + 12.5, left <= 5 && blink() ? P.orange : P.white, 1, 'c');
     }
-  }
+  });
 }
 function drawMessages() {
   let y = 16;
@@ -2224,7 +2251,7 @@ function tutorialHint() {
   if (!S.segs.some(s => s.owner === 'you')) return 'CLICK YOUR RIG, THEN CLICK UNDERGROUND TO DRILL';
   if (!mine.some(r => r.pockets.size)) return 'STEER YOUR PIPE INTO A PURPLE CRUDE POCKET';
   if (!S.haulers.length) return 'BUY A HAULER [3] AND PICK A SIDE - IT HAULS AND SELLS BY ITSELF';
-  if (S.stats.sold === 0) return 'YOUR HAULER RUNS ON ITS OWN - KEEP THOSE RIGS PUMPING';
+  if (S.stats.sold === 0) return 'HAULERS RUN THEMSELVES - CLICK A REFINERY OR < > TO SEND MORE';
   return null;
 }
 function drawHint() {
@@ -2324,9 +2351,10 @@ function drawTooltip() {
       else if (t === T_GAS) lines.push('GAS POCKET', has('gas') ? 'SIPHON READY - WORTH $$$' : 'DANGER: BLOWOUT!');
     }
   } else if (m.y > 13 && m.y < SURF + 4) {
-    const s = S.stations.find(s => (Math.abs(m.x - s.x) <= 26 && m.y > SURF - 44) || (m.y < 58 && Math.abs(m.x - (s.x < 320 ? 31 : W - 31)) <= 29));
+    const s = S.stations.find(s => (Math.abs(m.x - s.x) <= 26 && m.y > SURF - 44) || (m.y < 61 && m.x >= stationPanelX(s) && m.x <= stationPanelX(s) + SP_W));
     if (s) {
       lines.push(s.name + ' REFINERY', s.closed > 0 ? 'CLOSED ' + s.closed + ' DAYS' : 'PAYS $' + price(s).toFixed(2) + ' / UNIT');
+      lines.push('HAULERS SELLING HERE: ' + S.haulers.filter(h => h.side === S.stations.indexOf(s)).length, 'CLICK TO SEND ONE MORE. < > ADJUSTS');
       if (s.job) lines.push('CONTRACT: ' + Math.floor(s.job.done) + '/' + s.job.units + 'U BY DAY ' + s.job.deadline, 'REWARD $' + fmt(s.job.cred) + ' + ' + s.job.rd + ' RD');
     }
     else if (m.y > SURF - 30) {
@@ -2898,9 +2926,9 @@ function haulerAt(x, y) {
 }
 function stationAt(x, y) {
   for (const s of S.stations) {
-    const x0 = s.x < 320 ? 2 : W - 60;
+    const x0 = stationPanelX(s);
     if (Math.abs(x - s.x) <= 26 && y >= SURF - 46 && y <= SURF + 2) return s;
-    if (x >= x0 && x <= x0 + 58 && y >= 15 && y <= 50) return s;
+    if (x >= x0 && x <= x0 + SP_W && y >= 14 && y <= 60) return s;
   }
   return null;
 }
@@ -2930,9 +2958,11 @@ function playUp(p) {
   clickWorld(p);
 }
 function clickWorld(p) {
-  if (S.sel && S.sel.kind === 'hauler') {
-    const stn = stationAt(p.x, p.y);
-    if (stn) { setSide(S.sel.ref, S.stations.indexOf(stn)); return; }
+  const stn = stationAt(p.x, p.y);
+  if (stn) {
+    if (S.sel && S.sel.kind === 'hauler') setSide(S.sel.ref, S.stations.indexOf(stn));
+    else sendHaulerTo(S.stations.indexOf(stn));
+    return;
   }
   const h = haulerAt(p.x, p.y);
   if (h) { S.sel = { kind: 'hauler', ref: h }; sfx('click'); return; }
